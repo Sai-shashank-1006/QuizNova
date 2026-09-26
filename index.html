@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QuizNova — Offline Quiz Battles</title>
+  <meta name="description" content="QuizNova is an offline quiz game: solo fastest-finger runs, same-device battles and shareable challenge codes across education, comics, movies, series, anime, gaming and sports — with AI-written questions.">
+  <meta name="theme-color" content="#17191A">
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="preload" as="image" href="assets/quiznova-logo.webp">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash.
+    try { const t = localStorage.getItem('qn.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+    // The logo gloss masks with the logo image, which Chrome blocks when the page is opened straight from disk (file://).
+    if (location.protocol !== 'file:') document.documentElement.classList.add('can-gloss');
+  </script>
+</head>
+<body class="logged-out">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <div class="app">
+    <!-- ============ Sidebar (bottom bar on phones) ============ -->
+    <aside class="sidebar" aria-label="Main navigation">
+      <div class="side-inner">
+        <button class="side-logo" type="button" data-nav="home" aria-label="QuizNova home"><img src="assets/quiznova-mark.webp" alt="" width="48" height="48"></button>
+        <nav class="side-nav">
+          <button class="side-btn" type="button" data-nav="home" aria-label="Home" title="Home"><span data-icon="home"></span></button>
+          <button class="side-btn" type="button" data-action="solo-setup" aria-label="Solo game" title="Solo game"><span data-icon="bolt"></span></button>
+          <button class="side-btn" type="button" data-nav="battle" aria-label="Battle mode" title="Battle mode"><span data-icon="swords"></span></button>
+          <button class="side-btn" type="button" data-nav="online" aria-label="Play online" title="Play online"><span data-icon="wifi"></span></button>
+          <button class="side-btn side-extra" type="button" data-action="open-code" aria-label="Challenge code" title="Challenge code"><span data-icon="ticket"></span></button>
+          <button class="side-btn" type="button" data-nav="leaderboard" aria-label="Hall of Fame" title="Hall of Fame"><span data-icon="trophy"></span></button>
+          <button class="side-btn side-extra" type="button" data-nav="profile" aria-label="Your stats" title="Your stats"><span data-icon="chart"></span></button>
+        </nav>
+        <div class="side-bottom">
+          <button class="side-btn" type="button" data-action="ai-settings" aria-label="AI settings" title="AI settings"><span data-icon="sparkle"></span></button>
+          <button class="side-btn" type="button" data-action="help" aria-label="How to play" title="How to play"><span data-icon="help"></span></button>
+          <button class="side-avatar" type="button" data-nav="profile" id="side-avatar" aria-label="Your profile" title="Your profile"></button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <!-- ============ Sticky top bar ============ -->
+      <header class="topbar">
+        <a class="wordmark-link" href="#" data-nav="home" aria-label="QuizNova home"><span class="logo"><img src="assets/quiznova-logo.webp" alt="" width="1200" height="367"></span></a>
+        <div class="top-status needs-user" id="top-status" role="status">
+          <span class="status-dot"></span><span id="top-status-text">Offline</span>
+        </div>
+        <button class="ai-chip needs-user" type="button" id="ai-chip" data-action="ai-settings"></button>
+        <button class="user-chip needs-user" type="button" id="user-chip" data-nav="profile"></button>
+        <button class="icon-btn" type="button" id="sound-toggle" data-action="sound" aria-label="Mute sounds"></button>
+        <button class="icon-btn" type="button" id="theme-toggle" data-action="theme" aria-label="Switch to dark mode"></button>
+      </header>
+
+      <main id="main">
+        <!-- Views are rendered by js/app.js -->
+        <section class="view" id="view-auth" aria-label="Log in" hidden></section>
+        <section class="view" id="view-home" aria-label="Home" hidden></section>
+        <section class="view" id="view-battle" aria-label="Battle setup" hidden></section>
+        <section class="view" id="view-online" aria-label="Online room" hidden></section>
+        <section class="view" id="view-game" aria-label="Game" hidden></section>
+        <section class="view" id="view-results" aria-label="Results" hidden></section>
+        <section class="view" id="view-leaderboard" aria-label="Hall of Fame" hidden></section>
+        <section class="view" id="view-profile" aria-label="Your stats" hidden></section>
+      </main>
+    </div>
+  </div>
+
+  <!-- ============ Solo setup ============ -->
+  <dialog class="modal" id="dlg-solo" aria-labelledby="solo-title">
+    <form class="modal-card" id="form-solo" novalidate>
+      <header class="modal-head">
+        <span class="ic-circle ink" data-icon="bolt"></span>
+        <div>
+          <h2 id="solo-title">Solo · Fastest finger</h2>
+          <p class="muted">Every question has a timer. The faster you answer, the more you score.</p>
+        </div>
+        <button type="button" class="icon-btn sm" data-close aria-label="Close"><span data-icon="x"></span></button>
+      </header>
+      <div class="form-stack">
+        <div class="field">
+          <label for="solo-subject">Subject</label>
+          <select class="select input" id="solo-subject" name="subject"></select>
+        </div>
+        <div class="field" id="solo-topic-field" hidden>
+          <label for="solo-topic">Your topic</label>
+          <input class="input" id="solo-topic" name="topic" maxlength="60" autocomplete="off" placeholder="e.g. Attack on Titan, IPL 2024, Ancient Egypt">
+          <p class="err" id="solo-topic-err"></p>
+        </div>
+        <fieldset class="field seg-field">
+          <legend>Questions from</legend>
+          <div class="seg">
+            <label><input type="radio" name="source" value="ai"><span><span data-icon="sparkle"></span>AI (new every game)</span></label>
+            <label><input type="radio" name="source" value="local"><span><span data-icon="book"></span>Built-in</span></label>
+          </div>
+          <p class="hint" id="solo-source-hint"></p>
+        </fieldset>
+        <fieldset class="field seg-field" id="solo-diff-field">
+          <legend>Difficulty</legend>
+          <div class="seg">
+            <label><input type="radio" name="difficulty" value="mixed"><span>Mixed</span></label>
+            <label><input type="radio" name="difficulty" value="easy"><span>Easy</span></label>
+            <label><input type="radio" name="difficulty" value="medium"><span>Medium</span></label>
+            <label><input type="radio" name="difficulty" value="hard" checked><span>Hard</span></label>
+          </div>
+        </fieldset>
+        <fieldset class="field seg-field">
+          <legend>Questions</legend>
+          <div class="seg">
+            <label><input type="radio" name="count" value="5"><span>5</span></label>
+            <label><input type="radio" name="count" value="10" checked><span>10</span></label>
+          </div>
+        </fieldset>
+        <fieldset class="field seg-field">
+          <legend>Speed</legend>
+          <div class="seg">
+            <label><input type="radio" name="speed" value="blitz"><span>Blitz <small>8 s</small></span></label>
+            <label><input type="radio" name="speed" value="classic" checked><span>Classic <small>15 s</small></span></label>
+            <label><input type="radio" name="speed" value="relaxed"><span>Relaxed <small>25 s</small></span></label>
+          </div>
+          <p class="hint">Written answers get double time.</p>
+        </fieldset>
+      </div>
+      <footer class="modal-foot single">
+        <button type="submit" class="btn btn-ink btn-lg btn-block"><span data-icon="play"></span>START SOLO GAME</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ============ AI settings ============ -->
+  <dialog class="modal" id="dlg-ai" aria-labelledby="ai-title">
+    <form class="modal-card" id="form-ai" novalidate>
+      <header class="modal-head">
+        <span class="ic-circle red" data-icon="sparkle"></span>
+        <div>
+          <h2 id="ai-title">Turn on AI questions</h2>
+          <p class="muted">With AI on, every game gets brand-new questions — on any subject or any topic you type. Without it, you play the 10 built-in questions per subject, which repeat.</p>
+        </div>
+        <button type="button" class="icon-btn sm" data-close aria-label="Close"><span data-icon="x"></span></button>
+      </header>
+      <div class="form-stack">
+        <fieldset class="provider-grid">
+          <legend class="sr-only">Where questions come from</legend>
+          <label class="provider-card">
+            <input type="radio" name="provider" value="chrome">
+            <span class="pc-body">
+              <span class="pc-top"><span class="ic-circle" data-icon="cpu"></span><b>Free AI on this PC</b><span class="badge green">Free</span></span>
+              <small>Chrome’s built-in AI (Gemini Nano). No key, no cost, no account. One-time download of a few GB. Less accurate than Claude.</small>
+            </span>
+          </label>
+          <label class="provider-card">
+            <input type="radio" name="provider" value="claude">
+            <span class="pc-body">
+              <span class="pc-top"><span class="ic-circle red" data-icon="sparkle"></span><b>Claude</b><span class="badge red">Best</span></span>
+              <small>Anthropic’s Claude writes the most accurate, hardest questions. Needs your own API key · about 1–4¢ per game.</small>
+            </span>
+          </label>
+        </fieldset>
+
+        <div id="nano-fields" class="provider-fields">
+          <p class="nano-status" id="nano-status">Checking your browser…</p>
+          <div class="progress" id="nano-progress" hidden><span></span></div>
+          <button type="button" class="btn btn-ink" id="nano-download" data-action="nano-download" hidden><span data-icon="play"></span>Download &amp; turn on free AI</button>
+        </div>
+
+        <div id="claude-fields" class="provider-fields">
+          <div class="field">
+            <label for="ai-key">Anthropic API key</label>
+            <div class="input-group">
+              <input class="input mono" id="ai-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+              <button type="button" class="icon-btn sm" data-toggle-pass="ai-key" aria-label="Show key"><span data-icon="eye"></span></button>
+            </div>
+            <p class="hint">Create one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com → API Keys</a>. It is saved only in this browser and sent only to Anthropic.</p>
+          </div>
+          <div class="field">
+            <label for="ai-model">Model</label>
+            <select class="select input" id="ai-model"></select>
+            <p class="hint" id="ai-cost"></p>
+          </div>
+          <div class="claude-actions">
+            <button type="button" class="btn btn-sm" data-action="ai-test"><span data-icon="check"></span>Test key</button>
+            <button type="button" class="btn btn-sm" data-action="ai-remove">Remove key</button>
+          </div>
+          <p class="note"><span data-icon="lock"></span>Don’t save your key on a shared or public computer — anyone using this browser could use it.</p>
+        </div>
+
+        <p class="ai-status" id="ai-status" role="status" hidden></p>
+      </div>
+      <footer class="modal-foot wrap">
+        <button type="button" class="btn" data-action="ai-later">Not now</button>
+        <span class="spacer"></span>
+        <button type="submit" class="btn btn-red">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ============ Enter a challenge code ============ -->
+  <dialog class="modal" id="dlg-code" aria-labelledby="code-title">
+    <form class="modal-card" id="form-code" novalidate>
+      <header class="modal-head">
+        <span class="ic-circle red" data-icon="ticket"></span>
+        <div>
+          <h2 id="code-title">Play a challenge</h2>
+          <p class="muted">Paste the code a friend sent you. You get the exact same questions, then see who wins.</p>
+        </div>
+        <button type="button" class="icon-btn sm" data-close aria-label="Close"><span data-icon="x"></span></button>
+      </header>
+      <div class="form-stack">
+        <div class="field">
+          <label for="code-input">Challenge code</label>
+          <textarea class="input mono" id="code-input" rows="3" spellcheck="false" placeholder="Paste the whole message (QN2-…)"></textarea>
+          <p class="err" id="code-err"></p>
+        </div>
+        <div class="code-preview" id="code-preview" hidden></div>
+      </div>
+      <footer class="modal-foot single">
+        <button type="submit" class="btn btn-red btn-lg btn-block" id="code-start" disabled><span data-icon="play"></span>ACCEPT CHALLENGE</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ============ Share a challenge code ============ -->
+  <dialog class="modal" id="dlg-share" aria-labelledby="share-title">
+    <div class="modal-card">
+      <header class="modal-head">
+        <span class="ic-circle red" data-icon="send"></span>
+        <div>
+          <h2 id="share-title">Challenge a friend</h2>
+          <p class="muted">Send this message to anyone who has QuizNova. They paste it into <b>Enter code</b> and play your exact questions.</p>
+        </div>
+        <button type="button" class="icon-btn sm" data-close aria-label="Close"><span data-icon="x"></span></button>
+      </header>
+      <label class="sr-only" for="share-text">Challenge message</label>
+      <textarea class="input mono share-text" id="share-text" rows="5" readonly></textarea>
+      <footer class="modal-foot">
+        <button type="button" class="btn" data-close>Done</button>
+        <button type="button" class="btn btn-ink" data-action="copy-share"><span data-icon="copy"></span>Copy message</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- ============ Add a battle player ============ -->
+  <dialog class="modal narrow" id="dlg-player" aria-labelledby="player-title">
+    <div class="modal-card">
+      <header class="modal-head">
+        <span class="ic-circle ink" data-icon="user"></span>
+        <div>
+          <h2 id="player-title">Add a player</h2>
+          <p class="muted">Each player logs in with their own ID so their score is saved.</p>
+        </div>
+        <button type="button" class="icon-btn sm" data-close aria-label="Close"><span data-icon="x"></span></button>
+      </header>
+      <div id="player-auth"></div>
+    </div>
+  </dialog>
+
+  <!-- ============ How to play ============ -->
+  <dialog class="modal" id="dlg-help" aria-labelledby="help-title">
+    <div class="modal-card">
+      <header class="modal-head">
+        <span class="ic-circle ink" data-icon="help"></span>
+        <div>
+          <h2 id="help-title">How to play</h2>
+          <p class="muted">Everything runs offline — scores are saved on this device.</p>
+        </div>
+        <button type="button" class="icon-btn sm" data-close aria-label="Close"><span data-icon="x"></span></button>
+      </header>
+      <div class="help-grid stg">
+        <section>
+          <h3><span data-icon="sparkle"></span>AI questions</h3>
+          <ul>
+            <li>Turn on AI in <b>AI settings</b> and every game gets brand-new questions — they’re hard by default and never repeat ones you’ve had recently.</li>
+            <li><b>Free:</b> Chrome’s built-in AI runs on your PC (one-time download, no key). <b>Best:</b> Claude, with your own Anthropic API key.</li>
+            <li>Type <b>any topic</b> on the home screen — a series, a game, a player — and get a quiz about it.</li>
+            <li>With AI off, you play the 10 built-in questions per subject, which repeat.</li>
+            <li>AI can still get a fact wrong. On the results screen, press <b>Wrong answer? Report it</b> — the question stops counting against you and won’t come back.</li>
+            <li><b>Maths</b> doesn’t need AI: by default QuizNova makes brand-new problems every game — from sums to calculus — and checks every answer itself. You can pick AI instead, but AI can get maths answers wrong.</li>
+          </ul>
+        </section>
+        <section>
+          <h3><span data-icon="bolt"></span>Solo · fastest finger</h3>
+          <ul>
+            <li>Each question has its own timer. Answer before it runs out.</li>
+            <li>Correct answers score <b>100</b> plus up to <b>100</b> for speed. Hard AI questions are worth ×1.5, medium ×1.2.</li>
+            <li>Chain correct answers for a streak bonus of up to <b>+100</b>.</li>
+            <li>One of each power-up per game: <b>50:50</b> (removes two wrong answers, or gives a hint), <b>+10 s</b> and <b>Skip</b> (keeps your streak).</li>
+            <li>Surprise rounds: <b>Double</b> ×2, <b>Lightning</b> (half the time, ×3) and <b>Mystery box</b> (a secret ×1–×4).</li>
+            <li>Keys: <kbd>1</kbd>–<kbd>4</kbd> or <kbd>A</kbd>–<kbd>D</kbd> to answer, <kbd>Enter</kbd> for the next question.</li>
+          </ul>
+        </section>
+        <section>
+          <h3><span data-icon="swords"></span>Battle · 2–4 players, one device</h3>
+          <ul>
+            <li>Every player logs in with their own ID and gets a buzzer key: <kbd>Q</kbd> <kbd>P</kbd> <kbd>Z</kbd> <kbd>M</kbd>.</li>
+            <li>Read the question, then buzz when it says <b>BUZZ!</b> Buzzing early is a false start.</li>
+            <li>The first buzzer answers with <kbd>1</kbd>–<kbd>4</kbd>: <b>+100</b> plus a speed bonus, or <b>−50</b> if wrong.</li>
+            <li>On touch screens, tap your player card to buzz.</li>
+          </ul>
+        </section>
+        <section>
+          <h3><span data-icon="wifi"></span>Online room · friends on their own devices</h3>
+          <ul>
+            <li>Press <b>Online</b>, create a room and send your friends the 5-letter code. They press <b>Online → Join</b>.</li>
+            <li>Everyone answers the same question at the same time, on their own phone or PC. Right answers score <b>100</b> plus up to <b>100</b> for speed.</li>
+            <li>The host’s device runs the game (and its AI, if you pick AI) — keep it open until the end. Up to 8 players.</li>
+          </ul>
+        </section>
+        <section>
+          <h3><span data-icon="ticket"></span>Challenge codes · anyone, anywhere</h3>
+          <ul>
+            <li>After a solo game, press <b>Challenge a friend</b> and send the code.</li>
+            <li>Your friend pastes it into <b>Enter code</b> on their own copy of QuizNova.</li>
+            <li>The code carries the exact questions — even AI ones — so your friend doesn’t need an API key to play them.</li>
+          </ul>
+        </section>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ============ Confirm ============ -->
+  <dialog class="modal narrow" id="dlg-confirm" aria-labelledby="confirm-title">
+    <div class="modal-card">
+      <h2 id="confirm-title">Are you sure?</h2>
+      <p class="muted" id="confirm-text"></p>
+      <footer class="modal-foot">
+        <button type="button" class="btn" data-close>Cancel</button>
+        <button type="button" class="btn btn-red" id="confirm-ok">Confirm</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+  <script src="js/data.js"></script>
+  <script src="js/maths.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
