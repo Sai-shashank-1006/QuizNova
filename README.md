@@ -5,15 +5,15 @@
 QuizNova is a quiz game built with **HTML5, CSS3 and JavaScript**. Its code is kept in **Git and GitHub**, and a **Jenkins** pipeline checks and packages it.
 
 - **AI questions:** an AI writes brand-new, hard questions every game, on any subject or any topic you type. Use Chrome's **free** built-in AI (no key), or **Claude**, Anthropic's AI model, for the best quality.
-- **No repeats:** QuizNova remembers the questions you've had and throws away any the AI repeats.
+- **No repeats:** QuizNova remembers the questions you've had and their answers, and throws away any the AI repeats, even reworded.
 - **Real maths:** the Maths subjects are solvable problems (arithmetic, algebra, geometry, calculus) that QuizNova makes and checks itself, with no AI needed (or pick AI if you prefer).
-- **Built-in questions:** 140 questions work fully offline and take over automatically when AI is off or there's no internet.
+- **Built-in questions:** 206 questions work fully offline and take over automatically when AI is off or there's no internet.
 - **Look:** a neumorphic (soft, raised) design in light grey, near-black and red, with light and dark modes and lots of motion (see [Animations](#animations)).
 - **Logo:** a One Piece-style logo: the straw-hat Jolly Roger sits inside the Q, Luffy stands in for the "i", and a rope runs along the bottom.
 
 ## AI questions
 
-> **Why do questions repeat?** With AI off, you play the 10 built-in questions per subject, so they come back. Turn on AI and every game gets new ones. QuizNova offers to turn it on the first time you log in.
+> **Why do questions repeat?** With AI off, you play each subject's small set of built-in questions (10 to 20), so they come back once you've had them all. Turn on AI and every game gets new ones. QuizNova offers to turn it on the first time you log in.
 
 Open **AI settings** (the ✨ button) and pick one of two options.
 
@@ -44,7 +44,8 @@ Costs are billed to your own Anthropic account.
 ### What the AI does
 - **Streams questions in one by one.** The game starts as soon as the first question is written, and the clock pauses if you answer faster than the AI writes.
 - **Hard by default.** Solo games ask for "deep cuts only real experts know". You can switch to Mixed, Easy or Medium.
-- **Never repeats itself.** QuizNova keeps the last 150 questions for each topic and sends the most recent ones to the AI as "don't repeat these". It also throws away any new question that shares almost all its key words with one you've had. Each round asks for a random style ("numbers and records", "quotes"…) to keep things unpredictable.
+- **Never repeats itself.** QuizNova saves every AI question and its answer the moment it arrives (so quitting a game still counts), keeps the last 150 for each topic, and sends the most recent ones to the AI as "don't ask these again". It throws away any new question that shares almost all its key words with one you've had, or has the same answer and asks about the same person, place or thing in other words. Built-in questions added to an AI round never repeat one already in it. Each round asks for a random style ("numbers and records", "quotes"…), and some subjects also get a random focus (a season, a hero, a director) to keep things unpredictable.
+- **Stays on topic.** Game of Thrones and House of the Dragon are separate subjects: each asks only about its own show, and AI questions that name the other show's characters or dragons are thrown away.
 - **Writes a mix of formats:** multiple-choice, true/false and short written answers. Hard questions are worth ×1.5 and medium ×1.2.
 - **Lets you quiz on anything:** type a topic on the home screen, like "Attack on Titan", "IPL 2024" or "Ancient Egypt".
 
@@ -67,8 +68,8 @@ For the most accurate AI questions, use Claude. For guaranteed-correct answers, 
 | Educational | HTML & CSS, JavaScript, Git & DevOps, Data Structures, Science | Geography, History |
 | Maths | Mathematics (a mix), Arithmetic, Basic Algebra, Algebra, Geometry & Trig, Calculus: endless generated problems, no AI needed | — |
 | Comics | Marvel, DC | — |
-| Movies | Hollywood, Indian Cinema | Harry Potter, Star Wars |
-| Series | — | Series Mix, Stranger Things, Game of Thrones, Breaking Bad, Money Heist, Squid Game, Friends, The Office, Indian Web Series, K-Dramas, Cartoons |
+| Movies | Hollywood, MCU (Marvel Cinematic Universe), Indian Cinema, TFI (Telugu cinema: the tier-1 heroes and star directors), Dune (Part One and Part Two) | Harry Potter, Star Wars |
+| Series | Game of Thrones, House of the Dragon | Series Mix, Stranger Things, Breaking Bad, Money Heist, Squid Game, Friends, The Office, Indian Web Series, K-Dramas, Cartoons |
 | Anime | One Piece, Naruto | Dragon Ball, Demon Slayer, Attack on Titan, Jujutsu Kaisen |
 | Gaming | — | Video Games, Minecraft, Grand Theft Auto, Fortnite, Pokémon, Super Mario, BGMI & PUBG, Free Fire, Valorant, Call of Duty, Clash of Clans & Royale, The Legend of Zelda |
 | Sports | Cricket, Football | Formula 1, Basketball |
@@ -76,7 +77,7 @@ For the most accurate AI questions, use Claude. For guaranteed-correct answers, 
 
 On top of these, **Any topic** accepts whatever you type (AI only).
 
-With the built-in questions, ones you haven't seen yet always come first. The rotation starts over once you've seen them all.
+With the built-in questions, ones you haven't seen come first, then the ones you saw longest ago, so a question only comes back after you've had the rest of that subject's questions.
 
 ## Maths
 
@@ -206,7 +207,7 @@ Quiz Application/
 ├── css/
 │   └── style.css   # Neumorphic theme (light/dark), layouts, motion & micro-interactions
 ├── js/
-│   ├── data.js     # Categories, subjects (with AI topics) and the 140 built-in questions
+│   ├── data.js     # Categories, subjects (with AI topics) and the 206 built-in questions
 │   ├── maths.js    # Maths problem generator: arithmetic → calculus, answers worked out by QuizNova
 │   └── app.js      # Accounts, AI question streaming (Chrome AI or Claude), solo and battle engines, challenge codes, stats, logo, motion helpers
 ├── Jenkinsfile     # CI pipeline: checkout → validate → package
