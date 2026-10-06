@@ -7,13 +7,13 @@ QuizNova is a quiz game built with **HTML5, CSS3 and JavaScript**. Its code is k
 - **AI questions:** an AI writes brand-new, hard questions every game, on any subject or any topic you type. Use Chrome's **free** built-in AI (no key), or **Claude**, Anthropic's AI model, for the best quality.
 - **No repeats:** QuizNova remembers the questions you've had and their answers, and throws away any the AI repeats, even reworded.
 - **Real maths:** the Maths subjects are solvable problems (arithmetic, algebra, geometry, calculus) that QuizNova makes and checks itself, with no AI needed (or pick AI if you prefer).
-- **Built-in questions:** 206 questions work fully offline and take over automatically when AI is off or there's no internet.
+- **Built-in questions:** 231 questions work fully offline and take over automatically when AI is off or there's no internet.
 - **Look:** a neumorphic (soft, raised) design in light grey, near-black and red, with light and dark modes and lots of motion (see [Animations](#animations)).
 - **Logo:** a One Piece-style logo: the straw-hat Jolly Roger sits inside the Q, Luffy stands in for the "i", and a rope runs along the bottom.
 
 ## AI questions
 
-> **Why do questions repeat?** With AI off, you play each subject's small set of built-in questions (10 to 20), so they come back once you've had them all. Turn on AI and every game gets new ones. QuizNova offers to turn it on the first time you log in.
+> **Why do questions repeat?** With AI off, you play each subject's small set of built-in questions (10 to 45), so they come back once you've had them all. Turn on AI and every game gets new ones. QuizNova offers to turn it on the first time you log in.
 
 Open **AI settings** (the ✨ button) and pick one of two options.
 
@@ -68,7 +68,7 @@ For the most accurate AI questions, use Claude. For guaranteed-correct answers, 
 | Educational | HTML & CSS, JavaScript, Git & DevOps, Data Structures, Science | Geography, History |
 | Maths | Mathematics (a mix), Arithmetic, Basic Algebra, Algebra, Geometry & Trig, Calculus: endless generated problems, no AI needed | — |
 | Comics | Marvel, DC | — |
-| Movies | Hollywood, MCU (Marvel Cinematic Universe), Indian Cinema, TFI (Telugu cinema: the tier-1 heroes and star directors), Dune (Part One and Part Two) | Harry Potter, Star Wars |
+| Movies | Hollywood, MCU (Marvel Cinematic Universe), Indian Cinema, TFI (Telugu cinema: the tier-1 heroes and star directors; fact-checked built-in questions by default, since AI often gets these facts wrong), Dune (Part One and Part Two) | Harry Potter, Star Wars |
 | Series | Game of Thrones, House of the Dragon | Series Mix, Stranger Things, Breaking Bad, Money Heist, Squid Game, Friends, The Office, Indian Web Series, K-Dramas, Cartoons |
 | Anime | One Piece, Naruto | Dragon Ball, Demon Slayer, Attack on Titan, Jujutsu Kaisen |
 | Gaming | — | Video Games, Minecraft, Grand Theft Auto, Fortnite, Pokémon, Super Mario, BGMI & PUBG, Free Fire, Valorant, Call of Duty, Clash of Clans & Royale, The Legend of Zelda |
@@ -207,7 +207,7 @@ Quiz Application/
 ├── css/
 │   └── style.css   # Neumorphic theme (light/dark), layouts, motion & micro-interactions
 ├── js/
-│   ├── data.js     # Categories, subjects (with AI topics) and the 206 built-in questions
+│   ├── data.js     # Categories, subjects (with AI topics) and the 231 built-in questions
 │   ├── maths.js    # Maths problem generator: arithmetic → calculus, answers worked out by QuizNova
 │   └── app.js      # Accounts, AI question streaming (Chrome AI or Claude), solo and battle engines, challenge codes, stats, logo, motion helpers
 ├── Jenkinsfile     # CI pipeline: checkout → validate → package
