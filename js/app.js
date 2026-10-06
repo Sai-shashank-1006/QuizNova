@@ -7,9 +7,10 @@
  *  - Challenge codes: a finished solo run (questions included) is packed into a code that anyone
  *    with QuizNova can replay on their own device — no server needed.
  *
- * Questions come from Claude (Anthropic API, using the player's own key) or from the built-in bank.
- * AI questions stream in one at a time, so a game starts as soon as the first question is written.
- * Without a key or internet, the built-in questions are used automatically.
+ * Questions come from AI (Claude with the player's own key, or Chrome's built-in AI) or from the built-in bank.
+ * AI questions stream in one at a time, so a game starts as soon as the first question is written. AI rounds
+ * never mix in built-in questions. For subjects with checked film data (TFI), QuizNova picks the questions and
+ * the AI only rewrites their wording.
  *
  * Player IDs, hashed passwords, game history and the API key are stored in this browser's localStorage.
  */
@@ -273,8 +274,8 @@
   };
   const aiLabel = () => { const c = aiCfg(); return c.provider === 'claude' ? AI_MODELS[c.model].label : 'Chrome’s free AI'; };
   const defaultSource = subject => isGen(subject) ? 'local' : aiReady() || !hasLocal(subject) ? 'ai' : 'local';
-  // Subjects with checked facts (data.js FACTS): the AI writes its questions from them instead of from memory.
-  const factsFor = id => (D.FACTS && D.FACTS[id]) || null;
+  // Subjects with checked film data (data.js FILMS): AI rounds take their questions from it (see startFilmFeed).
+  const filmsFor = id => (D.FILMS && D.FILMS[id]) || null;
 
   /* ---------- Chrome's built-in AI (Gemini Nano, runs on this PC) ---------- */
   const NANO_OPTS = { expectedInputs: [{ type: 'text', languages: ['en'] }], expectedOutputs: [{ type: 'text', languages: ['en'] }] };
@@ -508,12 +509,11 @@
     return ids.flatMap(id => D.QUESTION_BANK[id].map((q, i) => ({ key: `${id}:${i}`, q })));
   }
   // Questions this player has never seen come first, then the ones they saw longest ago, so nothing comes back
-  // until the rest of the bank has been played. `skip` leaves questions out, `avoid` moves them to the back and
-  // `freshOnly` keeps only never-seen ones.
-  function buildLocal(subject, n, seed, mcqOnly, difficulty = 'mixed', { skip = null, avoid = null, freshOnly = false } = {}) {
+  // until the rest of the bank has been played.
+  function buildLocal(subject, n, seed, mcqOnly, difficulty = 'mixed') {
     if (isGen(subject)) return M.build(SUBJ[subject].gen, n, rng(`${seed}:maths`), { mcqOnly, difficulty });
     const full = localPool(subject);
-    const pool = full.filter(e => (!mcqOnly || e.q.type === 'mcq') && !(skip && skip(e.q)));
+    const pool = full.filter(e => !mcqOnly || e.q.type === 'mcq');
     const r = rng(`${seed}:local`);
     const all = store.get(K.seen, {}) || {};
     const uk = idKey(S.user && S.user.id);
@@ -522,8 +522,7 @@
     const age = new Map(mine.map((k, i) => [k, i]));
     const fresh = shuffle(pool.filter(e => !age.has(e.key)), r);
     const stale = pool.filter(e => age.has(e.key)).sort((a, b) => age.get(a.key) - age.get(b.key));
-    const ordered = freshOnly ? fresh : [...fresh, ...stale];
-    const picked = (avoid ? [...ordered.filter(e => !avoid(e.q)), ...ordered.filter(e => avoid(e.q))] : ordered).slice(0, n);
+    const picked = [...fresh, ...stale].slice(0, n);
     const taken = new Set(picked.map(e => e.key));
     all[uk] = { ...(all[uk] || {}), [subject]: [...mine.filter(k => !taken.has(k)), ...picked.map(e => e.key)] };
     store.set(K.seen, all);
@@ -646,19 +645,16 @@ Latency-sensitive; begin your visible answer immediately.`;
     ].filter(Boolean).join('\n\n');
   }
 
-  function aiPrompt({ subject, topic, n, difficulty, mcqOnly, avoid, facts }) {
+  function aiPrompt({ subject, topic, n, difficulty, mcqOnly, avoid }) {
     const about = subject === 'custom' ? `"${topic}"` : SUBJ[subject].topic;
     if (isMathsSpec({ subject, topic })) return mathsPrompt({ about, n, difficulty, mcqOnly, avoid });
     const tf = Math.max(1, Math.round(n / 5)), written = Math.max(1, Math.round(n / 8));
-    // Questions written from checked facts skip true/false: a false statement can't be checked against the facts.
-    const types = facts ? (mcqOnly ? 'All "mcq" with 4 options.' : `Mostly "mcq" with 4 options; about ${written} "written" (answer of 1-3 words, taken from the facts).`)
-      : mcqOnly
-        ? `All "mcq" with 4 options, except about ${tf} "truefalse".`
-        : `Mostly "mcq" with 4 options; about ${tf} "truefalse" and about ${written} "written" (answer of 1-3 words).`;
-    const careful = aiCfg().provider === 'chrome' || !!facts;
-    // Subjects with a `focus` list get a few random areas per round, so games don't keep circling the same facts
-    // (for subjects with checked facts, a random sample of them does the same job).
-    const focus = !facts && subject !== 'custom' && SUBJ[subject].focus ? shuffle(SUBJ[subject].focus).slice(0, 3) : [];
+    const types = mcqOnly
+      ? `All "mcq" with 4 options, except about ${tf} "truefalse".`
+      : `Mostly "mcq" with 4 options; about ${tf} "truefalse" and about ${written} "written" (answer of 1-3 words).`;
+    const careful = aiCfg().provider === 'chrome';
+    // Subjects with a `focus` list get a few random areas per round, so games don't keep circling the same facts.
+    const focus = subject !== 'custom' && SUBJ[subject].focus ? shuffle(SUBJ[subject].focus).slice(0, 3) : [];
     const diff = careful ? {
       mixed: 'mixed — easy, medium and hard, but only about well-known facts you are completely sure of',
       easy: 'all easy — things a casual fan knows',
@@ -672,13 +668,10 @@ Latency-sensitive; begin your visible answer immediately.`;
     }[difficulty] || 'mixed';
     return [
       `Write ${n} quiz questions about ${about}.`,
-      facts ? 'Use ONLY the checked facts below, not your own memory. Every question must be answered by one of these facts, with the correct option written as it appears in the fact. Wrong options must be other names from the facts that clearly do not answer the question. When a fact lists several films or people, never ask a question that more than one of them would answer.' : '',
-      facts ? `Checked facts:\n${facts.map(f => `- ${f}`).join('\n')}` : '',
       focus.length ? `This round, put most of the questions on: ${focus.join('; ')}.` : '',
       `Difficulty: ${diff}.`,
       `Types: ${types} Mix up the order of types and difficulties.`,
-      facts ? 'Spread the questions across different facts, heroes and directors.'
-        : careful ? 'Only use facts you are completely sure of. A simple question that is right beats a clever one that is wrong.'
+      careful ? 'Only use facts you are completely sure of. A simple question that is right beats a clever one that is wrong.'
         : difficulty === 'easy' ? '' : 'Skip the famous, overused facts everyone already knows. Surprise the player with lesser-known facts that are still true.',
       `For variety this round, lean into: ${shuffle(careful ? SAFE_ANGLES : AI_ANGLES).slice(0, 2).join(' and ')}.`,
       avoid.length ? `These were asked recently (question → answer). Do not ask any of them again, reworded or not, and do not test the same facts:\n${avoid.map(a => `- ${a}`).join('\n')}` : '',
@@ -715,7 +708,8 @@ Latency-sensitive; begin your visible answer immediately.`;
     };
   }
 
-  // Streams questions from the chosen AI, calling onQuestion(raw) for each one as it completes.
+  // Streams questions from the chosen AI, calling onQuestion(raw) for each one as it completes. A spec can bring its
+  // own prompt, JSON schema and system prompt (used to reword checked questions); otherwise it asks for new questions.
   function aiGenerate(spec, onQuestion, signal) {
     return aiCfg().provider === 'chrome' ? nanoGenerate(spec, onQuestion, signal) : claudeGenerate(spec, onQuestion, signal);
   }
@@ -723,9 +717,9 @@ Latency-sensitive; begin your visible answer immediately.`;
   // Chrome's built-in model, streamed with the same JSON schema.
   async function nanoGenerate(spec, onQuestion, signal) {
     if (!nanoSupported()) throw Object.assign(new Error('nano-missing'), { nano: true });
-    const session = await LanguageModel.create({ ...NANO_OPTS, initialPrompts: [{ role: 'system', content: AI_SYSTEM }], signal });
+    const session = await LanguageModel.create({ ...NANO_OPTS, initialPrompts: [{ role: 'system', content: spec.system || AI_SYSTEM }], signal });
     try {
-      const stream = session.promptStreaming(aiPrompt(spec), { responseConstraint: QUESTION_SCHEMA, signal });
+      const stream = session.promptStreaming(spec.prompt || aiPrompt(spec), { responseConstraint: spec.schema || QUESTION_SCHEMA, signal });
       const parser = createQuestionParser(onQuestion);
       let first = null, mode = null, acc = '';
       for await (const chunk of stream) {
@@ -748,9 +742,9 @@ Latency-sensitive; begin your visible answer immediately.`;
     const params = {
       model: cfg.model,
       max_tokens: 16000,
-      system: AI_SYSTEM,
-      messages: [{ role: 'user', content: aiPrompt(spec) }],
-      output_config: { format: { type: 'json_schema', schema: QUESTION_SCHEMA } },
+      system: spec.system || AI_SYSTEM,
+      messages: [{ role: 'user', content: spec.prompt || aiPrompt(spec) }],
+      output_config: { format: { type: 'json_schema', schema: spec.schema || QUESTION_SCHEMA } },
     };
     // Question writing is routine work: low effort keeps the first question fast; maths gets more room to work
     // the answers out (effort isn't supported on Haiku 4.5).
@@ -863,14 +857,14 @@ Latency-sensitive; begin your visible answer immediately.`;
   // AI history: every AI question asked, with its answer, kept per subject (or typed topic) so later rounds skip it.
   const histKey = (subject, topic) => subject === 'custom' ? `custom:${normAnswer(topic).slice(0, 40)}` : subject;
   const answerOf = q => q.type === 'mcq' ? (q.tf ? '' : q.options[q.answer]) : q.answerText || '';
-  const histEntry = q => ({ q: q.code ? `${q.q}\n${q.code}` : q.q, a: answerOf(q) });
-  // Entries are { q, a }; older versions stored bare question strings.
+  const histEntry = q => ({ q: q.code ? `${q.q}\n${q.code}` : q.q, a: answerOf(q), ...(q.key ? { k: q.key } : {}) });
+  // Entries are { q, a, k? } (k: the key of a checked film question); older versions stored bare question strings.
   function aiHistory(key) {
     const h = store.get(K.aiHist, {}) || {};
     return (Array.isArray(h[key]) ? h[key] : []).map(e => typeof e === 'string' ? { q: e, a: '' } : e).filter(e => e && typeof e.q === 'string');
   }
   function rememberAI(key, questions) {
-    const add = questions.filter(q => q.ai).map(histEntry);
+    const add = questions.filter(q => q.ai || q.key).map(histEntry);
     if (!add.length) return;
     const h = store.get(K.aiHist, {}) || {};
     h[key] = [...aiHistory(key).filter(e => !add.some(x => x.q === e.q)), ...add].slice(-150);
@@ -919,102 +913,250 @@ Latency-sensitive; begin your visible answer immediately.`;
     return q => re.test(`${q.q}\n${answerOf(q)}`);
   }
 
-  // An AI question written from checked facts is kept only if:
-  // - a fact about the same film or person (one sharing a name with the question) contains its answer;
-  // - no wrong option fits the question as well through another fact (the question would have two answers);
-  // - inside that fact, no wrong option sits in a part of the sentence that matches the question better
-  //   ("Jr. NTR plays Komaram Bheem, and Ram Charan plays Alluri Sitarama Raju").
-  const squash = s => normAnswer(s).replace(/[^a-z0-9]+/g, '');
-  const wordsOf = s => normAnswer(s).replace(/[^a-z0-9 ]+/g, ' ').split(' ').filter(Boolean);
-  function backedByFacts(q, facts) {
-    if (q.tf) return false;
-    const answer = answerOf(q), key = squash(answer);
-    if (key.length < 2) return false;
-    const names = namesIn(q.q, answer);
-    const fit = f => { const inFact = namesIn(f, ''); let n = 0; for (const w of names) if (inFact.has(w)) n++; return n; };
-    const withAnswer = facts.filter(f => squash(f).includes(key));
-    const best = Math.max(0, ...withAnswer.map(fit));
-    if (best < 1) return false;
-    if (q.type !== 'mcq') return true;
-    const wrong = q.options.filter((_, k) => k !== q.answer);
-    if (wrong.some(o => facts.some(f => !squash(f).includes(key) && squash(f).includes(squash(o)) && fit(f) >= best))) return false;
-    // The question's names and years, to see which part of the fact each option belongs to.
-    const answerWords = wordsOf(answer);
-    const anchors = q.q.split(/\s+/).filter(w => /^[“"‘'(]?([A-Z]|\d{4})/.test(w)).flatMap(wordsOf)
-      .filter(w => (w.length > 2 || /^\d{4}$/.test(w)) && !STOP_WORDS.has(w) && !LEAD_WORDS.has(w) && !answerWords.includes(w));
-    return withAnswer.filter(f => fit(f) === best).some(f => {
-      const parts = f.split(/[,;]| and /);
-      const score = o => Math.max(-1, ...parts.filter(c => squash(c).includes(squash(o))).map(c => {
-        const cw = new Set(wordsOf(c));
-        return anchors.filter(w => cw.has(w)).length;
-      }));
-      const mine = score(answer);
-      return mine < 0 || wrong.every(o => score(o) <= mine);
-    });
+  /* ---------- Checked film questions (data.js FILMS) ---------- */
+  // For subjects with film data, AI rounds don't rely on the AI's memory: QuizNova picks each question, its answer and
+  // its wrong options from the checked data, so every answer is right, and the AI only rewrites the wording.
+  const FILM_KINDS = {
+    easy: ['director', 'heroine', 'byRole'],
+    medium: ['director', 'heroine', 'byRole', 'year', 'role'],
+    hard: ['music', 'role', 'cast', 'banner', 'byDirector', 'first', 'remake', 'year'],
+  };
+  const KIND_LEVEL = {
+    director: 'medium', heroine: 'medium', byRole: 'medium', year: 'medium',
+    role: 'hard', music: 'hard', cast: 'hard', banner: 'hard', byDirector: 'hard', first: 'hard', remake: 'hard',
+  };
+  // Real composers and source films, so there are always enough wrong options.
+  const MORE_COMPOSERS = ['Mani Sharma', 'Devi Sri Prasad', 'S. Thaman', 'M. M. Keeravani', 'Anirudh Ravichander', 'Mickey J. Meyer',
+    'Harris Jayaraj', 'A. R. Rahman', 'Ravi Basrur', 'Santhosh Narayanan', 'G. V. Prakash Kumar', 'Chakri', 'Anup Rubens', 'Gopi Sundar'];
+  const MORE_SOURCES = ['Dabangg', 'Pink', 'Ayyappanum Koshiyum', 'Vinodhaya Sitham', 'Thani Oruvan', 'Lucifer', 'Vedalam', 'Theri', 'Drishyam'];
+  const listText = a => a.length < 2 ? a[0] : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`;
+  // Lowercase words with punctuation and accents dropped, padded so whole names can be matched.
+  const plain = s => ` ${String(s).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+  const says = (text, phrase) => plain(text).includes(plain(phrase));
+
+  // Three wrong options, the hardest first (e.g. directors the same hero has worked with), never a right one.
+  function wrongOptions(right, preferred, pool, r, isRight = () => false) {
+    const out = [];
+    for (const v of [...shuffle([...new Set(preferred)], r), ...shuffle([...new Set(pool)], r)]) {
+      if (out.length === 3) break;
+      if (v && !isRight(v) && plain(v) !== plain(right) && !out.some(o => plain(o) === plain(v))) out.push(v);
+    }
+    return out;
   }
 
-  // Starts streaming AI questions into a game. Missing questions are topped up from the built-in bank.
-  function startFeed(g, spec) {
+  // One checked question of the given kind about film f, or null if the data can't support it.
+  function filmQuestion(kind, f, films, r) {
+    const others = films.filter(x => x !== f);
+    const pool = field => others.flatMap(x => [].concat(x[field] || []));
+    const named = `${f.title} (${f.year})`;
+    const starring = listText(f.heroes.map(h => h[0]));
+    const [hero, role] = f.heroes[Math.floor(r() * f.heroes.length)];
+    const heroFilms = others.filter(x => x.heroes.some(h => h[0] === hero));
+    const inFilm = new Set([...f.heroes.map(h => h[0]), ...(f.heroines || []), ...(f.cast || []).map(c => c[0])].map(plain));
+    const make = (q, answer, wrong, explain, need, key = kind) => wrong.length < 3 ? null
+      : { type: 'mcq', q, options: [answer, ...wrong], answer: 0, explain, kind, need, key: `${f.title}:${key}`, difficulty: KIND_LEVEL[kind] };
+    switch (kind) {
+      case 'director':
+        return make(`Who directed ${named}?`, f.director,
+          wrongOptions(f.director, heroFilms.map(x => x.director), pool('director'), r),
+          `${f.director} directed ${named}, starring ${starring}.`, [f.title]);
+      case 'music':
+        if (!f.music) return null;
+        return make(`Who composed the songs for ${named}?`, f.music,
+          wrongOptions(f.music, heroFilms.map(x => x.music), [...pool('music'), ...MORE_COMPOSERS], r, v => plain(v) === plain(f.score || '')),
+          `${f.music} composed the songs for ${named}, directed by ${f.director}.`, [f.title]);
+      case 'heroine':
+        if (!f.heroines || !f.heroines.length) return null;
+        return make(f.heroines.length > 1 ? `Which of these actresses plays a female lead in ${named}?` : `Who plays the female lead in ${named}?`,
+          f.heroines[0], wrongOptions(f.heroines[0], heroFilms.flatMap(x => x.heroines || []), pool('heroines'), r, v => inFilm.has(plain(v))),
+          `${listText(f.heroines)} star${f.heroines.length > 1 ? '' : 's'} in ${named} with ${starring}.`, [f.title]);
+      case 'role': case 'byRole': {
+        if (!role) return null;
+        const explain = `${hero} plays ${role} in ${named}, directed by ${f.director}.`;
+        if (kind === 'role') {
+          const theirs = heroFilms.map(x => x.heroes.find(h => h[0] === hero)[1]);
+          return make(`What is the name of ${hero}’s character in ${named}?`, role,
+            wrongOptions(role, theirs.filter(Boolean), others.flatMap(x => x.heroes.map(h => h[1])).filter(Boolean), r),
+            explain, [f.title, hero], `role:${hero}`);
+        }
+        const sameRole = x => x.heroes.some(h => h[0] === hero && h[1] && plain(h[1]) === plain(role));
+        return make(`In which film does ${hero} play ${role}?`, f.title,
+          wrongOptions(f.title, heroFilms.filter(x => !sameRole(x)).map(x => x.title), [], r), explain, [hero, role], `byRole:${hero}`);
+      }
+      case 'cast': {
+        if (!f.cast || !f.cast.length) return null;
+        const [actor, part] = f.cast[Math.floor(r() * f.cast.length)];
+        return make(`Who plays ${part} in ${named}?`, actor,
+          wrongOptions(actor, heroFilms.flatMap(x => (x.cast || []).map(c => c[0])), pool('cast').map(c => c[0]), r, v => inFilm.has(plain(v))),
+          `${actor} plays ${part} in ${named}.`, [f.title, part], `cast:${part}`);
+      }
+      case 'banner':
+        if (!f.banners || !f.banners.length) return null;
+        return make(`Which production house made ${named}?`, f.banners[0],
+          wrongOptions(f.banners[0], heroFilms.flatMap(x => x.banners || []), pool('banners'), r, v => f.banners.some(b => plain(b) === plain(v))),
+          `${named} was produced by ${listText(f.banners)}.`, [f.title]);
+      case 'year': {
+        const near = [-3, -2, -1, 1, 2, 3].map(d => f.year + d).filter(y => y <= new Date().getFullYear());
+        return make(`In which year was ${f.title} released?`, String(f.year), wrongOptions(String(f.year), [], near.map(String), r),
+          `${f.title}, directed by ${f.director} and starring ${starring}, came out in ${f.year}.`, [f.title]);
+      }
+      case 'byDirector': {
+        const same = films.filter(x => x.heroes.some(h => h[0] === hero) && plain(x.director) === plain(f.director));
+        return make(`Which ${hero} film did ${f.director} direct${same.length > 1 ? ` in ${f.year}` : ''}?`, f.title,
+          wrongOptions(f.title, heroFilms.filter(x => plain(x.director) !== plain(f.director)).map(x => x.title), [], r),
+          `${f.director} directed ${hero} in ${named}.`, [hero, f.director], `byDirector:${hero}`);
+      }
+      case 'first': {
+        const four = shuffle(films.filter(x => x.heroes.some(h => h[0] === hero)), r)
+          .filter((x, i, a) => a.findIndex(y => y.year === x.year) === i).slice(0, 4).sort((a, b) => a.year - b.year);
+        if (four.length < 4) return null;
+        return { type: 'mcq', q: `Which of these ${hero} films came out first?`, options: four.map(x => x.title), answer: 0, kind, need: [hero],
+          explain: `${listText(four.map(x => `${x.title} (${x.year})`))}.`, key: `first:${hero}:${four[0].title}`, difficulty: KIND_LEVEL.first };
+      }
+      case 'remake':
+        if (!f.remakeOf) return null;
+        return make(`${named} is a remake of which film?`, f.remakeOf,
+          wrongOptions(f.remakeOf, [], [...pool('remakeOf'), ...MORE_SOURCES], r), `${named} is a remake of ${f.remakeOf}.`, [f.title]);
+    }
+    return null;
+  }
+
+  // A round of checked questions on different films, skipping facts asked recently (`used` keys) while it can.
+  function filmRound(films, n, difficulty, used, r) {
+    const kinds = FILM_KINDS[difficulty] || [...new Set(Object.values(FILM_KINDS).flat())];
+    const options = shuffle(films.flatMap(f => kinds.map(kind => ({ f, kind }))), r);
+    const out = [];
+    for (const pass of [0, 1, 2]) {
+      for (const { f, kind } of options) {
+        if (out.length >= n) return out;
+        if (pass === 0 && out.some(q => q.film === f.title)) continue;
+        const q = filmQuestion(kind, f, films, r);
+        if (!q || out.some(o => o.key === q.key) || (pass < 2 && used.has(q.key))) continue;
+        out.push({ ...q, film: f.title, difficulty: difficulty === 'easy' ? 'easy' : q.difficulty });
+      }
+    }
+    return out;
+  }
+
+  // The AI rewrites checked questions; QuizNova keeps the answer and options, and the rewrite must ask the same thing.
+  const REWRITE_SCHEMA = {
+    type: 'object',
+    properties: {
+      questions: {
+        type: 'array',
+        items: { type: 'object', properties: { id: { type: 'integer' }, question: { type: 'string' } }, required: ['id', 'question'], additionalProperties: false },
+      },
+    },
+    required: ['questions'],
+    additionalProperties: false,
+  };
+  const REWRITE_SYSTEM = `You are the question editor for QuizNova, a fast quiz game. You rewrite quiz questions so each one sounds like a sharp question from a hard fan quiz.
+
+Rules:
+- Keep exactly the same meaning and ask about exactly the same thing.
+- Keep every name, film title and year exactly as written.
+- Never add facts, hints or details, and never mention the answer.
+- One sentence under 25 words, ending with a question mark.
+
+Latency-sensitive; begin your visible answer immediately.`;
+  const rewritePrompt = qs => `Rewrite each question below. Reply as {"questions":[{"id":1,"question":"…"}]}, one item per question, with the same ids, in the same order.\n\n${qs.map((q, i) => `${i + 1}. ${q.q}`).join('\n')}`;
+  const KIND_WORDS = {
+    director: /direct/i, music: /song|music|compos|soundtrack|tune|album/i, heroine: /actress|heroine|female lead|leading lady|lead role|opposite/i,
+    role: /character|role|play|name/i, byRole: /film|movie/i, cast: /play|role|portray|character|cast/i, banner: /produc|banner|production|studio/i,
+    year: /year|release|came out|come out|screen/i, byDirector: /film|movie/i, first: /first|earliest|oldest|before/i, remake: /remake|based on|original/i,
+  };
+  function keepsMeaning(text, q) {
+    if (typeof text !== 'string') return false;
+    const t = text.trim();
+    return t.length >= 12 && t.length <= 220 && t.endsWith('?') && KIND_WORDS[q.kind].test(t)
+      && q.need.every(w => says(t, w)) && !says(t, q.options[q.answer]);
+  }
+
+  // AI rounds for subjects with film data: QuizNova picks checked questions and the AI rewrites their wording.
+  function startFilmFeed(g, spec, films) {
     const ctrl = new AbortController();
-    const cfg = aiCfg();
     g.feed = { done: false, error: null, errorKey: false, abort: ctrl, model: aiLabel(), rejected: 0, unsure: 0 };
     const key = histKey(spec.subject, spec.topic);
-    const history = aiHistory(key);
-    // The most recent questions, with their answers, go to the AI as "don't ask these again".
-    const avoid = history.slice(cfg.provider === 'chrome' ? -20 : -50).map(e => e.a ? `${e.q.slice(0, 90)} → ${e.a.slice(0, 40)}` : e.q.slice(0, 90));
-    // Ask for spares so repeats and doubtful questions can be thrown away (more once there's history to clash
-    // with), then stop as soon as the game is full.
-    const ask = Math.min(spec.n + (history.length ? 6 : 4), 16);
+    const r = rng(`${g.seed}:films`);
+    const picks = filmRound(films, g.n, spec.difficulty, new Set(aiHistory(key).map(e => e.k).filter(Boolean)), r);
+    const taken = new Set();
+    const take = (q, text) => {
+      if (taken.has(q) || S.game !== g || g.questions.length >= g.n) return;
+      taken.add(q);
+      const made = { ...prepQuestion(q, r), q: text || q.q, ai: !!text };
+      addQuestions(g, [made]);
+      rememberAI(key, [made]); // saved straight away, so quitting mid-game still counts it as asked
+      onFeedProgress(g);
+    };
+    const finish = err => {
+      if (S.game !== g) return;
+      const info = aiErrorInfo(err);
+      const left = picks.filter(q => !taken.has(q));
+      left.forEach(q => take(q, null)); // anything the AI didn't reword keeps QuizNova's wording
+      if (info && left.length) toast(`${info.msg} QuizNova worded ${left.length} question${left.length === 1 ? '' : 's'} itself.`, 'x');
+      g.n = g.questions.length;
+      g.feed.done = true;
+      onFeedProgress(g);
+    };
+    aiGenerate({ ...spec, prompt: rewritePrompt(picks), schema: REWRITE_SCHEMA, system: REWRITE_SYSTEM }, raw => {
+      const q = raw && Number.isInteger(raw.id) ? picks[raw.id - 1] : null;
+      if (!q || taken.has(q)) return;
+      take(q, keepsMeaning(raw.question, q) ? raw.question.trim() : null);
+      if (taken.size >= picks.length) ctrl.abort();
+    }, ctrl.signal).then(() => finish(null), finish);
+  }
+
+  // Starts streaming AI questions into a game. AI rounds never mix in built-in questions: if the AI comes up short
+  // (after repeats and doubtful questions are thrown away), it's asked once more, and after that the round is shorter.
+  function startFeed(g, spec) {
+    const films = filmsFor(spec.subject);
+    if (films) { startFilmFeed(g, spec, films); return; }
+    const ctrl = new AbortController();
+    const cfg = aiCfg();
+    g.feed = { done: false, error: null, errorKey: false, abort: ctrl, model: aiLabel(), rejected: 0, unsure: 0, more: null };
+    const key = histKey(spec.subject, spec.topic);
     const maths = isMathsSpec(spec);
     // Chrome's AI often leaves correct spellings out of typed answers, so it only writes choice questions.
     const mcqOnly = spec.mcqOnly || cfg.provider === 'chrome';
     const offTopic = offTopicTest(spec.subject);
-    // A fresh random sample of the checked facts each round (fewer for Chrome's smaller model) keeps games varied.
-    const facts = factsFor(spec.subject);
-    const sample = facts ? shuffle(facts).slice(0, cfg.provider === 'chrome' ? 25 : 40) : undefined;
-    aiGenerate({ ...spec, mcqOnly, n: ask, avoid, facts: sample }, raw => {
-      if (S.game !== g || g.questions.length >= g.n) return;
-      const q = normalizeAI(raw, mcqOnly, maths);
-      if (q === UNSURE) { g.feed.unsure++; return; }
-      if (!q || (offTopic && offTopic(q))) return;
-      if (facts && !backedByFacts(q, facts)) { g.feed.unsure++; return; }
-      const e = histEntry(q);
-      if (g.questions.some(o => sameQuestion(histEntry(o), e)) || history.some(h => sameQuestion(h, e))) { g.feed.rejected++; return; }
-      addQuestions(g, [q]);
-      rememberAI(key, [q]); // saved straight away, so quitting mid-game still counts it as asked
-      onFeedProgress(g);
-      if (g.questions.length >= g.n) ctrl.abort();
-    }, ctrl.signal)
-      .then(() => finishFeed(g, null))
-      .catch(err => finishFeed(g, err));
+    const run = want => {
+      const history = aiHistory(key); // includes this game's questions when asking again
+      // The most recent questions, with their answers, go to the AI as "don't ask these again".
+      const avoid = history.slice(cfg.provider === 'chrome' ? -20 : -50).map(e => e.a ? `${e.q.slice(0, 90)} → ${e.a.slice(0, 40)}` : e.q.slice(0, 90));
+      // Ask for spares so repeats and doubtful questions can be thrown away (more once there's history to clash
+      // with), then stop as soon as the game is full.
+      const ask = Math.min(want + (history.length ? 6 : 4), 16);
+      aiGenerate({ ...spec, mcqOnly, n: ask, avoid }, raw => {
+        if (S.game !== g || g.questions.length >= g.n) return;
+        const q = normalizeAI(raw, mcqOnly, maths);
+        if (q === UNSURE) { g.feed.unsure++; return; }
+        if (!q || (offTopic && offTopic(q))) return;
+        const e = histEntry(q);
+        if (g.questions.some(o => sameQuestion(histEntry(o), e)) || history.some(h => sameQuestion(h, e))) { g.feed.rejected++; return; }
+        addQuestions(g, [q]);
+        rememberAI(key, [q]); // saved straight away, so quitting mid-game still counts it as asked
+        onFeedProgress(g);
+        if (g.questions.length >= g.n) ctrl.abort();
+      }, ctrl.signal)
+        .then(() => finishFeed(g, null))
+        .catch(err => finishFeed(g, err));
+    };
+    g.feed.more = missing => { g.feed.more = null; run(missing); };
+    run(spec.n);
   }
 
   function finishFeed(g, err) {
     if (S.game !== g) return;
-    g.feed.done = true;
     const info = aiErrorInfo(err);
     if (info) { g.feed.error = info.msg; g.feed.errorKey = !!info.key; }
     const missing = g.n - g.questions.length;
+    if (missing > 0 && !info && g.feed.more) { g.feed.more(missing); return; }
+    g.feed.done = true;
     if (missing > 0) {
-      // Battles and online games only show choice questions. Built-in questions never repeat one in this game. Once
-      // the AI has filled half the round, they never repeat any earlier question either, AI or built-in (a shorter
-      // round beats a repeat); before that, repeats are only used as a last resort.
-      const asked = g.questions.map(histEntry), before = aiHistory(histKey(g.subject, g.topic));
-      const repeat = q => before.some(e => sameQuestion(e, histEntry(q)));
-      const strict = g.questions.length >= g.n / 2;
-      const local = hasLocal(g.subject)
-        ? buildLocal(g.subject, missing, `${g.seed}:topup`, g.kind !== 'solo', 'mixed', {
-          skip: q => asked.some(e => sameQuestion(e, histEntry(q))) || (strict && repeat(q)),
-          avoid: strict ? null : repeat, freshOnly: strict,
-        })
-        : [];
-      if (local.length) {
-        addQuestions(g, local);
+      if (g.questions.length) {
         g.n = g.questions.length;
-        toast(`${g.feed.error || 'The AI sent fewer questions than asked'} — added ${local.length} built-in question${local.length === 1 ? '' : 's'}.`, info ? 'x' : 'sparkle');
-      } else if (g.questions.length) {
-        g.n = g.questions.length;
-        if (g.feed.error) toast(`${g.feed.error} This round has ${g.n} question${g.n === 1 ? '' : 's'}.`, 'x');
+        toast(g.feed.error ? `${g.feed.error} This round has ${g.n} question${g.n === 1 ? '' : 's'}.`
+          : `The AI only wrote ${g.n} new question${g.n === 1 ? '' : 's'} this time, so the round is shorter.`, g.feed.error ? 'x' : 'sparkle');
       } else {
         const msg = g.feed.error || (g.feed.rejected
           ? 'The AI only came up with questions you’ve already had — try again, or pick another difficulty or topic.'
@@ -1619,7 +1761,7 @@ Latency-sensitive; begin your visible answer immediately.`;
       ? 'Chrome’s free AI writes brand-new maths problems, but it often gets maths answers wrong. Generated is always correct.'
       : `${aiLabel()} writes brand-new maths problems. AI can occasionally get an answer wrong; Generated is always correct.`;
     else if (src === 'ai' && !aiReady()) hint.innerHTML = `AI isn’t on yet — <button type="button" class="link-btn" data-action="ai-settings">turn on AI</button> (there’s a free option).`;
-    else if (src === 'ai' && factsFor(subj)) hint.textContent = `${aiLabel()} writes new questions from QuizNova’s checked ${SUBJ[subj].name} facts, and any answer the facts don’t back up is thrown away.`;
+    else if (src === 'ai' && filmsFor(subj)) hint.textContent = `QuizNova picks new questions from its checked ${SUBJ[subj].name} film data, so every answer is right, and ${aiLabel()} words them.`;
     else if (src === 'ai' && cfg.provider === 'claude') hint.textContent = `${AI_MODELS[cfg.model].label} writes brand-new questions · about ${AI_MODELS[cfg.model].cents}¢ per 10.`;
     else if (src === 'ai') hint.textContent = 'Chrome’s free AI writes brand-new questions on this PC. It’s less accurate than Claude — QuizNova drops answers it contradicts itself on, and you can report any wrong ones on the results screen.';
     else hint.textContent = bankNote(subj);
@@ -2275,7 +2417,7 @@ Latency-sensitive; begin your visible answer immediately.`;
     if (gen && src === 'local') hint.textContent = 'Endless maths problems — QuizNova works out every answer, no AI needed.';
     else if (gen && aiReady()) hint.textContent = `${aiLabel()} writes new maths problems — AI can get answers wrong; Generated is always correct.`;
     else if (src === 'ai' && !aiReady()) hint.innerHTML = `AI isn’t on yet — <button type="button" class="link-btn" data-action="ai-settings">turn on AI</button> (there’s a free option).`;
-    else hint.textContent = src === 'ai' ? `Fresh questions every battle · ${aiLabel()}${factsFor(subj) ? ', written from checked facts' : ''}.` : bankNote(subj, true);
+    else hint.textContent = src === 'ai' ? `Fresh questions every battle · ${aiLabel()}${filmsFor(subj) ? ', answers from checked film data' : ''}.` : bankNote(subj, true);
   }
 
   function renderRoster() {

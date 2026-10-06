@@ -7,7 +7,7 @@ QuizNova is a quiz game built with **HTML5, CSS3 and JavaScript**. Its code is k
 - **AI questions:** an AI writes brand-new, hard questions every game, on any subject or any topic you type. Use Chrome's **free** built-in AI (no key), or **Claude**, Anthropic's AI model, for the best quality.
 - **No repeats:** QuizNova remembers the questions you've had and their answers, and throws away any the AI repeats, even reworded.
 - **Real maths:** the Maths subjects are solvable problems (arithmetic, algebra, geometry, calculus) that QuizNova makes and checks itself, with no AI needed (or pick AI if you prefer).
-- **Built-in questions:** 231 questions work fully offline and take over automatically when AI is off or there's no internet.
+- **Built-in questions:** 231 questions work fully offline when AI is off. AI rounds never mix them in.
 - **Look:** a neumorphic (soft, raised) design in light grey, near-black and red, with light and dark modes and lots of motion (see [Animations](#animations)).
 - **Logo:** a One Piece-style logo: the straw-hat Jolly Roger sits inside the Q, Luffy stands in for the "i", and a rope runs along the bottom.
 
@@ -44,14 +44,14 @@ Costs are billed to your own Anthropic account.
 ### What the AI does
 - **Streams questions in one by one.** The game starts as soon as the first question is written, and the clock pauses if you answer faster than the AI writes.
 - **Hard by default.** Solo games ask for "deep cuts only real experts know". You can switch to Mixed, Easy or Medium.
-- **Never repeats itself.** QuizNova saves every AI question and its answer the moment it arrives (so quitting a game still counts), keeps the last 150 for each topic, and sends the most recent ones to the AI as "don't ask these again". It throws away any new question that shares almost all its key words with one you've had, or has the same answer and asks about the same person, place or thing in other words. Built-in questions added to an AI round never repeat one already in it. Each round asks for a random style ("numbers and records", "quotes"…), and some subjects also get a random focus (a season, a hero, a director) to keep things unpredictable.
-- **Checks its facts where AI is weak.** For TFI, the AI gets a random sample of checked facts each round and must write its questions from them; any question whose answer the facts don't back up, or that two options could answer, is thrown away.
+- **Never repeats itself.** QuizNova saves every AI question and its answer the moment it arrives (so quitting a game still counts), keeps the last 150 for each topic, and sends the most recent ones to the AI as "don't ask these again". It throws away any new question that shares almost all its key words with one you've had, or has the same answer and asks about the same person, place or thing in other words. If the AI comes up short, it's asked again; after that the round is just a little shorter. Each round asks for a random style ("numbers and records", "quotes"…), and some subjects also get a random focus (a season, a hero, a director) to keep things unpredictable.
+- **Never wrong on TFI.** AI often gets Telugu cinema facts wrong, so for TFI QuizNova picks every question, answer and wrong option from checked data on about 50 films of the tier-1 heroes (directors, music directors, heroines, characters, supporting cast, production houses, years and remakes, all from each film's Wikipedia page). The AI only rewrites the wording, and a rewrite that changes the meaning is thrown away. Hard rounds ask the deep cuts.
 - **Stays on topic.** Game of Thrones and House of the Dragon are separate subjects: each asks only about its own show, and AI questions that name the other show's characters or dragons are thrown away.
 - **Writes a mix of formats:** multiple-choice, true/false and short written answers. Hard questions are worth ×1.5 and medium ×1.2.
 - **Lets you quiz on anything:** type a topic on the home screen, like "Attack on Titan", "IPL 2024" or "Ancient Egypt".
 
 ### When something goes wrong
-- **No key, a rejected key, no internet, Anthropic overloaded, or Chrome's AI unavailable:** QuizNova tops the game up with built-in questions and says why.
+- **No key, a rejected key, no internet, Anthropic overloaded, or Chrome's AI unavailable:** QuizNova says why. Pick **Built-in** in the game setup to play without AI. (TFI rounds still work: QuizNova words the checked questions itself.)
 - **Custom topics** have no built-in questions, so you get a clear message instead.
 
 AI can occasionally get a fact wrong, and Chrome's free AI does so more often than Claude. QuizNova guards against it in three ways:
@@ -69,7 +69,7 @@ For the most accurate AI questions, use Claude. For guaranteed-correct answers, 
 | Educational | HTML & CSS, JavaScript, Git & DevOps, Data Structures, Science | Geography, History |
 | Maths | Mathematics (a mix), Arithmetic, Basic Algebra, Algebra, Geometry & Trig, Calculus: endless generated problems, no AI needed | — |
 | Comics | Marvel, DC | — |
-| Movies | Hollywood, MCU (Marvel Cinematic Universe), Indian Cinema, TFI (Telugu cinema: the tier-1 heroes and star directors; AI writes these questions from checked facts), Dune (Part One and Part Two) | Harry Potter, Star Wars |
+| Movies | Hollywood, MCU (Marvel Cinematic Universe), Indian Cinema, TFI (Telugu cinema: the tier-1 heroes and star directors; AI rounds use checked film data), Dune (Part One and Part Two) | Harry Potter, Star Wars |
 | Series | Game of Thrones, House of the Dragon | Series Mix, Stranger Things, Breaking Bad, Money Heist, Squid Game, Friends, The Office, Indian Web Series, K-Dramas, Cartoons |
 | Anime | One Piece, Naruto | Dragon Ball, Demon Slayer, Attack on Titan, Jujutsu Kaisen |
 | Gaming | — | Video Games, Minecraft, Grand Theft Auto, Fortnite, Pokémon, Super Mario, BGMI & PUBG, Free Fire, Valorant, Call of Duty, Clash of Clans & Royale, The Legend of Zelda |
