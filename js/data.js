@@ -20,8 +20,6 @@ window.QUIZ_DATA = (() => {
   // `gen` subjects get fresh problems from js/maths.js by default (answers worked out by QuizNova); players can pick AI instead.
   // `focus` lists areas of a subject; each AI round picks a few at random so games don't keep circling the same facts.
   // `offTopic` lists names that mean an AI question is about something else (e.g. a spin-off); those questions are dropped.
-  // `careful` subjects are niche enough that AI often gets their facts wrong: they start on the fact-checked built-in
-  // questions even when AI is on, and AI is told to stick to well-documented facts.
   const SUBJECTS = [
     { id: 'web', name: 'HTML & CSS', category: 'edu', code: 'WEB', tagline: 'Tags, selectors and layout tricks.', topic: 'HTML and CSS for web development' },
     { id: 'js', name: 'JavaScript', category: 'edu', code: 'JS', tagline: 'Types, arrays and the event loop.', topic: 'JavaScript programming' },
@@ -43,7 +41,7 @@ window.QUIZ_DATA = (() => {
     { id: 'indian', name: 'Indian Cinema', category: 'movies', code: 'IND', tagline: 'Bollywood, Tollywood and beyond.', topic: 'Indian cinema: Bollywood, Tollywood, Kollywood and more' },
     { id: 'tfi', name: 'TFI', category: 'movies', code: 'TFI', tagline: 'Tier-1 heroes, their blockbusters and star directors.', topic: 'modern Telugu cinema (TFI): the tier-1 heroes Prabhas, Mahesh Babu, Jr. NTR, Allu Arjun, Ram Charan and Pawan Kalyan and their films, and star directors such as S. S. Rajamouli, Sukumar, Trivikram Srinivas, Koratala Siva, Prashanth Neel, Sandeep Reddy Vanga and Nag Ashwin. Only films from 2005 onwards: no old classics or classic-era stars',
       focus: ['Prabhas and his films', 'Mahesh Babu and his films', 'Jr. NTR and his films', 'Allu Arjun and his films', 'Ram Charan and his films', 'Pawan Kalyan and his films', 'S. S. Rajamouli’s films', 'Sukumar’s films', 'Trivikram Srinivas’s films', 'Koratala Siva, Prashanth Neel and Sandeep Reddy Vanga', 'Nag Ashwin, Anil Ravipudi, Harish Shankar and Boyapati Srinu', 'hit songs and music directors of these heroes’ films'],
-      offTopic: ['mayabazar', 'pathala bhairavi', 'senior ntr', 'sr ntr', 'sr. ntr', 'akkineni nageswara rao', 'sankarabharanam', 'ghantasala', 'telugu desam'], careful: true },
+      offTopic: ['mayabazar', 'pathala bhairavi', 'senior ntr', 'sr ntr', 'sr. ntr', 'akkineni nageswara rao', 'sankarabharanam', 'ghantasala', 'telugu desam'] },
     { id: 'dune', name: 'Dune', category: 'movies', code: 'DUNE', tagline: 'Arrakis, sandworms and spice: Part One and Two.', topic: 'Denis Villeneuve’s two Dune films, Dune: Part One (2021) and Dune: Part Two (2024): their story, characters, cast, places, music and making. Only these two films, not the 1984 film, the TV series or later books', icon: 'dune',
       focus: ['Dune: Part One (2021)', 'Dune: Part Two (2024)', 'House Atreides', 'House Harkonnen', 'the Fremen, Arrakis and the sandworms', 'the Bene Gesserit and the Emperor', 'the cast and who plays whom', 'Denis Villeneuve, Hans Zimmer’s music and the Oscars'],
       offTopic: ['david lynch', 'kyle maclachlan', '1984', 'dune: prophecy', 'dune prophecy', 'dune messiah', 'part three'] },
@@ -367,6 +365,71 @@ window.QUIZ_DATA = (() => {
     ],
   };
 
+  // Checked facts the AI writes its questions from (instead of from memory) for subjects it often gets wrong.
+  // Every AI question's answer must be backed by one of these; keep each fact self-contained and verified.
+  const FACTS = {
+    tfi: [
+      'Prabhas played the title role in Baahubali: The Beginning (2015) and Baahubali 2: The Conclusion (2017), directed by S. S. Rajamouli.',
+      'In the Baahubali films, Rana Daggubati plays Bhallaladeva, the rival of Prabhas’s Baahubali.',
+      'The Baahubali films are set in the kingdom of Mahishmati; Kuntala is Devasena’s kingdom.',
+      'Salaar: Part 1 – Ceasefire (2023) was directed by Prashanth Neel, who also made the KGF films; Prabhas plays Deva and Prithviraj Sukumaran plays Varadha.',
+      'Salaar: Part 1 – Ceasefire is set in the fictional city-state of Khansaar.',
+      'Kalki 2898 AD (2024) was directed by Nag Ashwin; Prabhas plays Bhairava, a bounty hunter in Kasi.',
+      'Kalki 2898 AD also stars Amitabh Bachchan, Kamal Haasan and Deepika Padukone alongside Prabhas.',
+      'Mirchi (2013), starring Prabhas and Anushka Shetty, was the debut film of director Koratala Siva.',
+      'Saaho (2019), starring Prabhas, was directed by Sujeeth.',
+      'In Radhe Shyam (2022), directed by Radha Krishna Kumar, Prabhas plays Vikramaditya, a palmist.',
+      'Adipurush (2023), directed by Om Raut, retells the Ramayana with Prabhas as Raghava (Lord Ram).',
+      'Pokiri (2006), starring Mahesh Babu, was directed by Puri Jagannadh.',
+      'Sarileru Neekevvaru (2020), starring Mahesh Babu, was directed by Anil Ravipudi.',
+      'Trivikram Srinivas directed Mahesh Babu in Athadu (2005), Khaleja (2010) and Guntur Kaaram (2024).',
+      'Koratala Siva directed Mahesh Babu in Srimanthudu (2015) and Bharat Ane Nenu (2018).',
+      'In Bharat Ane Nenu (2018), Mahesh Babu plays Bharat, who was raised in London and becomes Chief Minister of Andhra Pradesh; Kiara Advani co-stars.',
+      'Maharshi (2019), directed by Vamshi Paidipally, was Mahesh Babu’s 25th film; he plays Rishi, with Pooja Hegde and Allari Naresh.',
+      'Businessman (2012), directed by Puri Jagannadh, stars Mahesh Babu as Surya, who comes to Mumbai to rule the city, with Kajal Aggarwal.',
+      'Dookudu (2011), starring Mahesh Babu and Samantha, was directed by Sreenu Vaitla.',
+      'Guntur Kaaram (2024) stars Mahesh Babu with Sreeleela and Meenakshi Chaudhary.',
+      'In RRR (2022), directed by S. S. Rajamouli, Jr. NTR plays Komaram Bheem and Ram Charan plays Alluri Sitarama Raju.',
+      'Jr. NTR and Ram Charan dance to “Naatu Naatu” in RRR; the song won the Oscar for Best Original Song in 2023.',
+      '“Naatu Naatu” from RRR was composed by M. M. Keeravani, with lyrics by Chandrabose.',
+      'In Jai Lava Kusa (2017), directed by Bobby, Jr. NTR plays the triplets Jai, Lava and Kusa; Devi Sri Prasad composed the music.',
+      'Janatha Garage (2016), directed by Koratala Siva, stars Jr. NTR and Mohanlal.',
+      'Devara: Part 1 (2024), starring Jr. NTR, was directed by Koratala Siva.',
+      'Aravinda Sametha Veera Raghava (2018), directed by Trivikram Srinivas, stars Jr. NTR and Pooja Hegde, with music by Thaman.',
+      'Yamadonga (2007), directed by S. S. Rajamouli, stars Jr. NTR, with Mohan Babu as Yama, the god of death.',
+      'Temper (2015), directed by Puri Jagannadh, stars Jr. NTR as Daya, a corrupt police officer who changes his ways.',
+      'War 2 (2025), directed by Ayan Mukerji, was Jr. NTR’s Hindi film debut, alongside Hrithik Roshan and Kiara Advani; it is part of the YRF Spy Universe.',
+      'Nannaku Prematho (2016), starring Jr. NTR, was directed by Sukumar.',
+      'Fans call Jr. NTR “Young Tiger”; he is also a trained Kuchipudi dancer.',
+      'Pushpa: The Rise (2021) and Pushpa 2: The Rule (2024) were directed by Sukumar; Allu Arjun plays Pushpa Raj, a red sandalwood smuggler.',
+      'Rashmika Mandanna plays Srivalli, Pushpa Raj’s love interest, in both Pushpa films.',
+      'Allu Arjun won the National Film Award for Best Actor for Pushpa: The Rise.',
+      'Ala Vaikunthapurramuloo (2020), directed by Trivikram Srinivas, stars Allu Arjun as Bantu, with Pooja Hegde.',
+      'The song “Butta Bomma” from Ala Vaikunthapurramuloo was composed by S. Thaman and sung by Armaan Malik.',
+      'Sarrainodu (2016), starring Allu Arjun, was directed by Boyapati Srinu.',
+      'Arya (2004) and Arya 2 (2009), starring Allu Arjun, were directed by Sukumar.',
+      'Allu Arjun was long known as “Stylish Star” and has been billed as “Icon Star” since Pushpa.',
+      'Ram Charan is the son of Megastar Chiranjeevi.',
+      'Ram Charan made his debut as a lead actor in Chirutha (2007), directed by Puri Jagannadh, and won the Filmfare Award for Best Male Debut (South).',
+      'In Magadheera (2009), directed by S. S. Rajamouli, Ram Charan plays the warrior Kala Bhairava, reborn 400 years later as Harsha; Kajal Aggarwal co-stars.',
+      'In Rangasthalam (2018), directed by Sukumar, Ram Charan plays Chitti Babu, a partly deaf villager.',
+      'Dhruva (2016), directed by Surender Reddy, stars Ram Charan as an IPS officer; it remakes the Tamil film Thani Oruvan, with Arvind Swamy as the villain.',
+      'Game Changer (2025), directed by S. Shankar, stars Ram Charan in a dual role, including an IAS officer, with Kiara Advani.',
+      'Gabbar Singh (2012), directed by Harish Shankar, remakes the Hindi film Dabangg; Pawan Kalyan plays a police officer who calls himself Gabbar Singh, opposite Shruti Haasan.',
+      'They Call Him OG (2025), directed by Sujeeth, stars Pawan Kalyan as Ojas Gambheera, with Emraan Hashmi as the villain Omi Bhau and music by Thaman.',
+      'Bheemla Nayak (2022), starring Pawan Kalyan and Rana Daggubati, remakes the Malayalam film Ayyappanum Koshiyum; Pawan Kalyan plays the cop Bheemla Nayak.',
+      'Vakeel Saab (2021), directed by Sriram Venu, remakes the Hindi film Pink; Pawan Kalyan plays a lawyer.',
+      'Jalsa (2008) and Attarintiki Daredi (2013), starring Pawan Kalyan, were directed by Trivikram Srinivas.',
+      'Fans call Pawan Kalyan “Power Star”.',
+      'S. S. Rajamouli directed Magadheera, Eega, the Baahubali films and RRR; he is nicknamed “Jakkanna” after a legendary sculptor.',
+      'V. Vijayendra Prasad, S. S. Rajamouli’s father, wrote the stories of Magadheera, the Baahubali films and RRR, and of the Hindi film Bajrangi Bhaijaan.',
+      'Sandeep Reddy Vanga directed Arjun Reddy (2017), starring Vijay Deverakonda, its Hindi remake Kabir Singh (2019) and Animal (2023), starring Ranbir Kapoor.',
+      'Prashanth Neel directed the KGF films and Salaar: Part 1 – Ceasefire.',
+      'Nag Ashwin directed Mahanati (2018) and Kalki 2898 AD (2024).',
+      'Eega (2012), directed by S. S. Rajamouli, stars Nani, whose character is reborn as a housefly.',
+    ],
+  };
+
   // Inline SVG figures so questions can carry images without extra files.
   const QUESTION_IMAGES = {
     bst: `<svg class="q-svg" viewBox="0 0 340 210" role="img" aria-label="Binary search tree. Root 8. Its left child is 3, which has children 1 and 6. Its right child is 10, which has a right child 14.">
@@ -393,5 +456,5 @@ window.QUIZ_DATA = (() => {
     </svg>`,
   };
 
-  return { BANK_VERSION, CATEGORIES, SUBJECTS, QUESTION_BANK, QUESTION_IMAGES };
+  return { BANK_VERSION, CATEGORIES, SUBJECTS, QUESTION_BANK, FACTS, QUESTION_IMAGES };
 })();

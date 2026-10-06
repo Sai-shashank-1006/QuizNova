@@ -45,6 +45,7 @@ Costs are billed to your own Anthropic account.
 - **Streams questions in one by one.** The game starts as soon as the first question is written, and the clock pauses if you answer faster than the AI writes.
 - **Hard by default.** Solo games ask for "deep cuts only real experts know". You can switch to Mixed, Easy or Medium.
 - **Never repeats itself.** QuizNova saves every AI question and its answer the moment it arrives (so quitting a game still counts), keeps the last 150 for each topic, and sends the most recent ones to the AI as "don't ask these again". It throws away any new question that shares almost all its key words with one you've had, or has the same answer and asks about the same person, place or thing in other words. Built-in questions added to an AI round never repeat one already in it. Each round asks for a random style ("numbers and records", "quotes"…), and some subjects also get a random focus (a season, a hero, a director) to keep things unpredictable.
+- **Checks its facts where AI is weak.** For TFI, the AI gets a random sample of checked facts each round and must write its questions from them; any question whose answer the facts don't back up, or that two options could answer, is thrown away.
 - **Stays on topic.** Game of Thrones and House of the Dragon are separate subjects: each asks only about its own show, and AI questions that name the other show's characters or dragons are thrown away.
 - **Writes a mix of formats:** multiple-choice, true/false and short written answers. Hard questions are worth ×1.5 and medium ×1.2.
 - **Lets you quiz on anything:** type a topic on the home screen, like "Attack on Titan", "IPL 2024" or "Ancient Egypt".
@@ -68,7 +69,7 @@ For the most accurate AI questions, use Claude. For guaranteed-correct answers, 
 | Educational | HTML & CSS, JavaScript, Git & DevOps, Data Structures, Science | Geography, History |
 | Maths | Mathematics (a mix), Arithmetic, Basic Algebra, Algebra, Geometry & Trig, Calculus: endless generated problems, no AI needed | — |
 | Comics | Marvel, DC | — |
-| Movies | Hollywood, MCU (Marvel Cinematic Universe), Indian Cinema, TFI (Telugu cinema: the tier-1 heroes and star directors; fact-checked built-in questions by default, since AI often gets these facts wrong), Dune (Part One and Part Two) | Harry Potter, Star Wars |
+| Movies | Hollywood, MCU (Marvel Cinematic Universe), Indian Cinema, TFI (Telugu cinema: the tier-1 heroes and star directors; AI writes these questions from checked facts), Dune (Part One and Part Two) | Harry Potter, Star Wars |
 | Series | Game of Thrones, House of the Dragon | Series Mix, Stranger Things, Breaking Bad, Money Heist, Squid Game, Friends, The Office, Indian Web Series, K-Dramas, Cartoons |
 | Anime | One Piece, Naruto | Dragon Ball, Demon Slayer, Attack on Titan, Jujutsu Kaisen |
 | Gaming | — | Video Games, Minecraft, Grand Theft Auto, Fortnite, Pokémon, Super Mario, BGMI & PUBG, Free Fire, Valorant, Call of Duty, Clash of Clans & Royale, The Legend of Zelda |
