@@ -61,11 +61,15 @@
   const ID_RE = /^[A-Za-z0-9_-]{3,16}$/;
   // Gemini models (both on Google's free tier). `think` is the thinking level for quiz questions and for maths:
   // as little as each model allows for trivia so the first question arrives fast, a bit more to work maths out.
+  // (3.6 Flash rather than the newest Flash: on the free tier the newest one often keeps players waiting.)
   const AI_MODELS = {
-    'gemini-3.8-flash': { label: 'Gemini 3.8 Flash', short: '3.8 Flash', note: 'Most precise', think: 'low', mathsThink: 'medium' },
+    'gemini-3.6-flash': { label: 'Gemini 3.6 Flash', short: '3.6 Flash', note: 'Most precise', think: 'low', mathsThink: 'medium' },
     'gemini-3.5-flash-lite': { label: 'Gemini 3.5 Flash-Lite', short: 'Flash-Lite', note: 'Fastest', think: 'minimal', mathsThink: 'low' },
   };
-  const DEFAULT_MODEL = 'gemini-3.8-flash';
+  const DEFAULT_MODEL = 'gemini-3.6-flash';
+  // Free-tier speed varies a lot. If a model hasn't written a question this soon, or stalls in the middle, the other
+  // model takes over, and a model that was slow or busy is tried last for a while.
+  const FIRST_QUESTION_MS = 10000, FIRST_MATHS_MS = 15000, STALL_MS = 25000, SLOW_FOR_MS = 10 * 60 * 1000;
   const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
   // Shared AI (js/config.js): the owner's Firebase project, so players don't need their own key.
   const CFG = window.QUIZNOVA_CONFIG || {};
@@ -709,23 +713,50 @@ Format:
     const cfg = aiCfg();
     if (!cfg.key && !sharedAI) throw new Error('no-key');
     const req = { prompt: spec.prompt || aiPrompt(spec), system: spec.system || AI_SYSTEM, schema: spec.schema || QUESTION_SCHEMA, maths: isMathsSpec(spec) };
-    const stream = cfg.key ? (model, r, emit) => geminiStream(cfg.key, model, r, emit, signal) : (model, r, emit) => firebaseStream(model, r, emit, signal);
-    const models = [cfg.model, ...Object.keys(AI_MODELS).filter(m => m !== cfg.model)];
+    const stream = cfg.key ? (model, r, emit, sig) => geminiStream(cfg.key, model, r, emit, sig) : (model, r, emit, sig) => firebaseStream(model, r, emit, sig);
+    const all = [cfg.model, ...Object.keys(AI_MODELS).filter(m => m !== cfg.model)];
+    const fast = m => !(slowModels.get(m) > now());
+    const models = [...all.filter(fast), ...all.filter(m => !fast(m))];
+    if (models[0] !== cfg.model && spec.onModel) spec.onModel(models[0], true);
     let got = 0;
     for (let k = 0, think = true; ;) {
+      // Each try has its own abort, so a slow or stalled model can be dropped without ending the game.
+      const ctrl = new AbortController(), stop = () => ctrl.abort();
+      if (signal) { if (signal.aborted) stop(); else signal.addEventListener('abort', stop, { once: true }); }
+      let timer = null, slow = false;
+      const watch = ms => { clearTimeout(timer); timer = setTimeout(() => { slow = true; ctrl.abort(); }, ms); };
+      watch(req.maths ? FIRST_MATHS_MS : FIRST_QUESTION_MS);
       try {
-        return await stream(models[k], { ...req, think }, raw => { got++; onQuestion(raw); });
+        await stream(models[k], { ...req, think }, raw => { got++; watch(STALL_MS); onQuestion(raw); }, ctrl.signal);
+        return;
       } catch (err) {
+        if (signal && signal.aborted) throw err; // the game is full or over
+        if (slow) {
+          slowModels.set(models[k], now() + SLOW_FOR_MS);
+          if (got) return; // keep what arrived: the feed asks again for the rest, starting with the other model
+          if (k + 1 >= models.length) throw Object.assign(new Error('slow'), { slow: true });
+          k++;
+          think = true;
+          if (spec.onModel) spec.onModel(models[k]);
+          continue;
+        }
         if (got) throw err;
         // A model that stops accepting the thinking setting still works without it.
         if (think && err.status === 400 && /thinking/i.test(err.message)) { think = false; continue; }
-        if (k + 1 >= models.length || ![404, 429, 500, 503].includes(err.status)) throw err;
+        if (![404, 429, 500, 503].includes(err.status)) throw err;
+        // Out of quota: tried last until Google says it resets (a used-up daily free limit lasts until midnight Pacific).
+        slowModels.set(models[k], now() + Math.max(SLOW_FOR_MS, Math.min(err.retryMs || 0, 24 * 3600 * 1000)));
+        if (k + 1 >= models.length) throw err;
         k++;
         think = true;
         if (spec.onModel) spec.onModel(models[k]);
+      } finally {
+        clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', stop);
       }
     }
   }
+  const slowModels = new Map(); // model → time until which it's tried last (it was slow, busy or out of quota)
 
   async function geminiStream(key, model, { prompt, system, schema, maths, think }, emit, signal) {
     const generationConfig = { responseMimeType: 'application/json', responseJsonSchema: schema, maxOutputTokens: 16384 };
@@ -784,8 +815,13 @@ Format:
     let e = {};
     try { e = (await res.json()).error || {}; } catch { /* not JSON */ }
     const reason = ((e.details || []).find(d => d && d.reason) || {}).reason || '';
-    return Object.assign(new Error(e.message || `HTTP ${res.status}`), { gemini: true, status: res.status, apiStatus: e.status || '', reason });
+    return Object.assign(new Error(e.message || `HTTP ${res.status}`), { gemini: true, status: res.status, apiStatus: e.status || '', reason, retryMs: retryMsFrom(e.details) });
   }
+  // Google's RetryInfo ("retryDelay": "52092s") says when a used-up limit resets.
+  const retryMsFrom = details => {
+    const d = Array.isArray(details) ? details.find(x => x && typeof x.retryDelay === 'string') : null;
+    return d ? (parseFloat(d.retryDelay) || 0) * 1000 : 0;
+  };
 
   /* ---------- Shared AI: Firebase AI Logic on the owner's project (js/config.js) ---------- */
   // Firebase's libraries load from Google's CDN the first time someone starts an AI game. App Check (reCAPTCHA)
@@ -838,17 +874,26 @@ Format:
     const code = err && err.code, data = (err && err.customErrorData) || {}, msg = (err && err.message) || String(err);
     if (code === 'api-not-enabled') return Object.assign(new Error(msg), { sharedSetup: true });
     if (code === 'fetch-error' && data.status) {
-      return Object.assign(new Error(msg), { gemini: true, shared: true, status: data.status, appCheck: [401, 403].includes(data.status) && /app ?check|attestation/i.test(msg) });
+      return Object.assign(new Error(msg), {
+        gemini: true, shared: true, status: data.status, retryMs: retryMsFrom(data.errorDetails),
+        appCheck: [401, 403].includes(data.status) && /app ?check|attestation/i.test(msg),
+      });
     }
     if (code === 'error' && /error fetching/i.test(msg)) return Object.assign(new Error('network'), { network: true });
     return Object.assign(new Error(msg), { shared: true });
   }
 
-  // A one-word request through the shared AI (AI settings → Test).
+  // A one-word request through the shared AI (AI settings → Test). If the picked model's free limit is used up,
+  // the other model is tried too, since games switch to it. Returns the model that answered.
   async function testShared(model) {
     const { fbAI, ai } = await loadFirebase();
-    try { await fbAI.getGenerativeModel(ai, { model, generationConfig: { maxOutputTokens: 256 } }).generateContent('Reply with the word OK.'); }
-    catch (err) { throw firebaseError(err); }
+    const ask = m => fbAI.getGenerativeModel(ai, { model: m, generationConfig: { maxOutputTokens: 256 } }).generateContent('Reply with the word OK.');
+    try { await ask(model); return model; }
+    catch (first) {
+      const err = firebaseError(first), other = Object.keys(AI_MODELS).find(m => m !== model);
+      if (err.status !== 429 || !other) throw err;
+      try { await ask(other); return other; } catch { throw err; }
+    }
   }
 
   // An AI question whose own parts disagree (its "correct" text, its explanation and the answer it marked)
@@ -914,6 +959,7 @@ Format:
     if (err.message === 'no-key') return { msg: 'Add your free Gemini API key in AI settings to use AI questions.', key: true };
     if (err.message === 'sdk-load') return { msg: 'Couldn’t load the AI — check your internet connection.' };
     if (err.network) return { msg: 'Couldn’t reach Gemini — check your internet connection.' };
+    if (err.slow) return { msg: 'The AI is taking too long right now — try again in a moment.' };
     if (err.blocked) return { msg: 'Gemini wouldn’t write questions on that topic — try a different one.' };
     // The shared AI (the owner's Firebase project).
     if (err.sharedSetup) return { msg: 'QuizNova’s shared AI isn’t switched on yet. Add your own free Gemini key in AI settings, or try again later.', key: true };
@@ -1152,12 +1198,12 @@ Latency-sensitive; begin your visible answer immediately.`;
       && q.need.every(w => says(t, w)) && !says(t, q.options[q.answer]);
   }
 
-  // When the chosen Gemini model is out of free quota or busy, the other one writes the round (see aiGenerate).
-  const modelSwitch = g => m => {
+  // When the chosen Gemini model is slow, busy or out of free quota, the other one writes the round (see aiGenerate).
+  const modelSwitch = g => (m, quiet) => {
     if (S.game !== g) return;
     g.feed.model = AI_MODELS[m].label;
     $$('[data-feed-model]').forEach(el => { el.textContent = g.feed.model; });
-    toast(`${aiLabel()} is busy or out of free quota, so ${AI_MODELS[m].label} is writing this round.`, 'sparkle');
+    if (!quiet) toast(`${aiLabel()} is slow or busy right now, so ${AI_MODELS[m].label} is writing this round.`, 'sparkle');
   };
 
   // AI rounds for subjects with film data: QuizNova picks checked questions and the AI rewrites their wording.
@@ -1797,8 +1843,9 @@ Latency-sensitive; begin your visible answer immediately.`;
     aiStatus(key ? 'Checking your key…' : 'Checking QuizNova’s shared AI…');
     try {
       if (!key) {
-        await testShared(model);
-        aiStatus(`The shared AI works: ${AI_MODELS[model].label} is ready.`, 'good');
+        const used = await testShared(model);
+        aiStatus(used === model ? `The shared AI works: ${AI_MODELS[model].label} is ready.`
+          : `The shared AI works: ${AI_MODELS[model].label} has used up today’s free limit, so ${AI_MODELS[used].label} writes the questions until it resets.`, 'good');
         return;
       }
       let res;

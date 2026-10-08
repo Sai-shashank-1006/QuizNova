@@ -13,6 +13,13 @@
  * Gemini API key or the reCAPTCHA secret key here. Leave firebase as null to make each player add their own key.
  */
 window.QUIZNOVA_CONFIG = {
-  firebase: null,
-  appCheck: { provider: 'recaptcha-v3', siteKey: '' },
+  firebase: {
+    apiKey: 'AIzaSyCc3Uu4MYwWNfYD9zWYVY3kAMd2t-TpdjI',
+    authDomain: 'quiznova-42b84.firebaseapp.com',
+    projectId: 'quiznova-42b84',
+    storageBucket: 'quiznova-42b84.firebasestorage.app',
+    messagingSenderId: '50161634788',
+    appId: '1:50161634788:web:76501a2c94866039c7cbf1',
+  },
+  appCheck: { provider: 'recaptcha-enterprise', siteKey: '6LeOm-QtAAAAAJLdw2-waA8xKTAJJQ8XTgoZneiI' },
 };

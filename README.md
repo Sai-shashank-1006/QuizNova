@@ -42,10 +42,10 @@ You choose the model in AI settings:
 
 | Model | Best for |
 |---|---|
-| Gemini 3.8 Flash (default) | Most precise: best for hard questions |
+| Gemini 3.6 Flash (default) | Most precise: best for hard questions |
 | Gemini 3.5 Flash-Lite | Fastest |
 
-If the chosen model is busy or out of free quota when a game starts, QuizNova switches to the other one for that round and says so.
+If the chosen model is busy or out of free quota, or is slow to start (no question within 10 seconds, 15 for maths) or stalls for 25 seconds, QuizNova switches to the other one, keeps the questions already written, and tries the slow model last for the next 10 minutes. Gemini 3.6 Flash is used rather than the newest Flash because, on the free tier, the newest one often keeps players waiting.
 
 ### What the AI does
 - **Streams questions in one by one.** The game starts as soon as the first question is written, and the clock pauses if you answer faster than the AI writes. Gemini thinks only briefly before writing, so the first question arrives in a few seconds.
@@ -66,7 +66,7 @@ AI can occasionally get a fact wrong. QuizNova guards against it in three ways:
 - **Self-checks, no extra AI calls.** The AI writes the fact first, then a question that fact answers, and names the correct option by its text as well as its position. A question is thrown away if those disagree, or if the explanation backs a different option. For maths, the working must contain the marked answer.
 - **Report it.** On the results screen, press **Wrong answer? Report it** next to any AI question. It stops counting towards your score and accuracy, it's left out of challenge codes, and it won't be asked again.
 
-For the most accurate AI questions, use Gemini 3.8 Flash. For guaranteed-correct answers, use the built-in questions or, for maths, **Generated**.
+For the most accurate AI questions, use Gemini 3.6 Flash. For guaranteed-correct answers, use the built-in questions or, for maths, **Generated**.
 
 ## Categories
 
@@ -247,7 +247,7 @@ Quiz Application/
 - **Shared AI:** it loads the Firebase JS SDK (`firebase-app`, `firebase-app-check`, `firebase-ai`, version 13.0.0, about 195 KB) from Google's CDN on the first AI game, sets up App Check with reCAPTCHA, and streams with `generateContentStream` through Firebase AI Logic. The same JSON schema, prompts and thinking levels are used.
 - **Structured output:** it asks for JSON (`responseMimeType` with a `responseJsonSchema`), so every response has the same shape. The schema puts the fact (`explain`) first, so the model writes the fact before the question.
 - **Streaming:** it reads the server-sent events and pulls out each question the moment its JSON object closes.
-- **Speed:** it sets the lowest useful thinking level (`thinkingConfig.thinkingLevel`: `low` on 3.8 Flash, `minimal` on Flash-Lite; one step more for maths), so the first question arrives fast.
+- **Speed:** it sets the lowest useful thinking level (`thinkingConfig.thinkingLevel`: `low` on 3.6 Flash, `minimal` on Flash-Lite; one step more for maths), so the first question arrives fast.
 - **Fallback:** if the chosen model returns "busy", "out of quota" or "not found" before any question arrives, it retries once with the other model.
 
 ## Git and GitHub
