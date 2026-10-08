@@ -2,12 +2,16 @@
 
 <p align="center"><img src="assets/quiznova-logo.webp" alt="QuizNova logo" width="520"></p>
 
-QuizNova is a quiz game built with **HTML5, CSS3 and JavaScript**. Its code is kept in **Git and GitHub**, and a **Jenkins** pipeline checks and packages it.
+QuizNova is a quiz game built with **HTML5, CSS3 and JavaScript**. It runs in any modern browser, on phones as well as PCs. Its code is kept in **Git and GitHub**, and a **Jenkins** pipeline checks and packages it.
 
-- **AI questions:** an AI writes brand-new, hard questions every game, on any subject or any topic you type. Use Chrome's **free** built-in AI (no key), or **Claude**, Anthropic's AI model, for the best quality.
+- **AI questions:** Google's **Gemini** writes brand-new questions every game, on any subject or any topic you type. It's free: each player adds their own Gemini API key from Google AI Studio.
+- **Exact difficulty:** pick Easy, Medium or Hard and every question in the game is at that level. QuizNova throws away any question the AI rates differently.
+- **20 questions a game** by default (5 and 10 are still there for quick games).
 - **No repeats:** QuizNova remembers the questions you've had and their answers, and throws away any the AI repeats, even reworded.
+- **Mystery boxes:** in battles and online rooms, boxes drop on random questions. The fastest right answer wins a power-up: 50:50, +10 s or Skip.
 - **Real maths:** the Maths subjects are solvable problems (arithmetic, algebra, geometry, calculus) that QuizNova makes and checks itself, with no AI needed (or pick AI if you prefer).
 - **Built-in questions:** 231 questions work fully offline when AI is off. AI rounds never mix them in.
+- **Phones and PCs:** the layout adapts from a wide desktop down to a small phone, with a bottom navigation bar and a score bar on small screens. Slow devices automatically get a lighter version with fewer looping animations.
 - **Look:** a neumorphic (soft, raised) design in light grey, near-black and red, with light and dark modes and lots of motion (see [Animations](#animations)).
 - **Logo:** a One Piece-style logo: the straw-hat Jolly Roger sits inside the Q, Luffy stands in for the "i", and a rope runs along the bottom.
 
@@ -15,52 +19,45 @@ QuizNova is a quiz game built with **HTML5, CSS3 and JavaScript**. Its code is k
 
 > **Why do questions repeat?** With AI off, you play each subject's small set of built-in questions (10 to 45), so they come back once you've had them all. Turn on AI and every game gets new ones. QuizNova offers to turn it on the first time you log in.
 
-Open **AI settings** (the ✨ button) and pick one of two options.
+### Turn it on (free)
+1. Open [Google AI Studio → API keys](https://aistudio.google.com/apikey) and sign in with a Google account.
+2. Press **Create API key** and copy it.
+3. In QuizNova, open **AI settings** (the ✨ button), paste the key, press **Test key**, then press **Save**.
 
-### Option 1: Free AI on this PC (Chrome)
-- Uses **Gemini Nano**, the AI built into Google Chrome. You don't need a key, an account or money.
-- Press **Download & turn on free AI**. Chrome downloads the model once (a few GB), and it works offline after that.
-- It needs a recent desktop Chrome on a PC that meets [Chrome's hardware requirements](https://developer.chrome.com/docs/ai/get-started). Where it isn't available, AI settings says so. Use Claude instead.
-- It's less accurate than Claude, so check the one-line explanations.
+The key is saved **only in your browser**, and it's sent only to Google. It's never part of the repo or the zip. **Every player uses their own key.** Don't save a key on a shared or public computer.
 
-### Option 2: Claude (best quality)
-1. Create an API key at [console.anthropic.com → API Keys](https://console.anthropic.com/settings/keys). You need an Anthropic account with some credit.
-2. In **AI settings**, choose **Claude**.
-3. Paste the key, press **Test key**, then press **Save**.
+Gemini's free tier has usage limits (requests per minute and per day). A game uses one request, so this is plenty for normal play. Google may use free-tier requests to improve its products; the requests only contain quiz topics and recent questions.
 
-The key is saved **only in your browser**, and it's sent only to Anthropic. It's never part of the repo or the zip. **Every player uses their own key.** Don't save a key on a shared or public computer.
-
-### Models and cost
+### Models
 You choose the model in AI settings:
 
-| Model | Best for | Rough cost per 10 questions |
-|---|---|---|
-| Claude Opus 5 (default) | Best quality | ~4¢ |
-| Claude Sonnet 5 | Faster and cheaper | ~2¢ |
-| Claude Haiku 4.5 | Fastest and cheapest | ~1¢ |
+| Model | Best for |
+|---|---|
+| Gemini 3.8 Flash (default) | Most precise: best for hard questions |
+| Gemini 3.5 Flash-Lite | Fastest |
 
-Costs are billed to your own Anthropic account.
+If the chosen model is busy or out of free quota when a game starts, QuizNova switches to the other one for that round and says so.
 
 ### What the AI does
-- **Streams questions in one by one.** The game starts as soon as the first question is written, and the clock pauses if you answer faster than the AI writes.
-- **Hard by default.** Solo games ask for "deep cuts only real experts know". You can switch to Mixed, Easy or Medium.
-- **Never repeats itself.** QuizNova saves every AI question and its answer the moment it arrives (so quitting a game still counts), keeps the last 150 for each topic, and sends the most recent ones to the AI as "don't ask these again". It throws away any new question that shares almost all its key words with one you've had, or has the same answer and asks about the same person, place or thing in other words. If the AI comes up short, it's asked again; after that the round is just a little shorter. Each round asks for a random style ("numbers and records", "quotes"…), and some subjects also get a random focus (a season, a hero, a director) to keep things unpredictable.
+- **Streams questions in one by one.** The game starts as soon as the first question is written, and the clock pauses if you answer faster than the AI writes. Gemini thinks only briefly before writing, so the first question arrives in a few seconds.
+- **Keeps your difficulty.** Hard is the default. Easy, Medium and Hard are each defined for the AI (Hard means deep cuts only dedicated fans or experts know), and the AI rates every question it writes: QuizNova throws away any that don't match, so a Hard game never slips in an easy one. Mixed gives roughly a third of each.
+- **Never repeats itself.** QuizNova saves every AI question and its answer the moment it arrives (so quitting a game still counts), keeps the last 200 for each topic, and sends the most recent ones to the AI as "don't ask these again". It throws away any new question that shares almost all its key words with one you've had, or has the same answer and asks about the same person, place or thing in other words. If the AI comes up short, it's asked again; after that the round is just a little shorter. Each round asks for a random style ("numbers and records", "quotes"…), and some subjects also get a random focus (a season, a hero, a director) to keep things unpredictable.
 - **Never wrong on TFI.** AI often gets Telugu cinema facts wrong, so for TFI QuizNova picks every question, answer and wrong option from checked data on about 50 films of the tier-1 heroes (directors, music directors, heroines, characters, supporting cast, production houses, years and remakes, all from each film's Wikipedia page). The AI only rewrites the wording, and a rewrite that changes the meaning is thrown away. Hard rounds ask the deep cuts.
 - **Stays on topic.** Game of Thrones and House of the Dragon are separate subjects: each asks only about its own show, and AI questions that name the other show's characters or dragons are thrown away.
 - **Writes a mix of formats:** multiple-choice, true/false and short written answers. Hard questions are worth ×1.5 and medium ×1.2.
 - **Lets you quiz on anything:** type a topic on the home screen, like "Attack on Titan", "IPL 2024" or "Ancient Egypt".
 
 ### When something goes wrong
-- **No key, a rejected key, no internet, Anthropic overloaded, or Chrome's AI unavailable:** QuizNova says why. Pick **Built-in** in the game setup to play without AI. (TFI rounds still work: QuizNova words the checked questions itself.)
+- **No key, a rejected key, no internet, Gemini busy or out of free quota:** QuizNova says why. Pick **Built-in** in the game setup to play without AI. (TFI rounds still work: QuizNova words the checked questions itself.)
 - **Custom topics** have no built-in questions, so you get a clear message instead.
 
-AI can occasionally get a fact wrong, and Chrome's free AI does so more often than Claude. QuizNova guards against it in three ways:
+AI can occasionally get a fact wrong. QuizNova guards against it in three ways:
 
+- **Accuracy-first instructions.** Gemini is told to use only well-documented facts, to avoid rumours and facts that change over time, and to write a different question when it isn't sure.
 - **Self-checks, no extra AI calls.** The AI writes the fact first, then a question that fact answers, and names the correct option by its text as well as its position. A question is thrown away if those disagree, or if the explanation backs a different option. For maths, the working must contain the marked answer.
-- **Safer instructions for Chrome's AI.** It is told to stick to well-known facts it's sure of, and it only writes multiple-choice and true/false questions, never typed answers.
 - **Report it.** On the results screen, press **Wrong answer? Report it** next to any AI question. It stops counting towards your score and accuracy, it's left out of challenge codes, and it won't be asked again.
 
-For the most accurate AI questions, use Claude. For guaranteed-correct answers, use the built-in questions or, for maths, **Generated**.
+For the most accurate AI questions, use Gemini 3.8 Flash. For guaranteed-correct answers, use the built-in questions or, for maths, **Generated**.
 
 ## Categories
 
@@ -84,7 +81,7 @@ With the built-in questions, ones you haven't seen come first, then the ones you
 
 Maths questions are real problems to solve, not trivia about famous mathematicians. QuizNova generates them from random numbers (in `js/maths.js`) and works out each answer itself. So they're always correct, never run out, work offline and don't use AI (small AI models often get arithmetic wrong).
 
-You can still choose **AI** for a Maths subject in the Solo or Battle setup (**Generated** is the default). AI gets a maths-only prompt that asks for problems to work out, with no history or famous-mathematician trivia, and its typed answers are checked by value too. It can still get an answer wrong, especially Chrome's free AI. Typing a maths topic such as "calculus" into **Quiz me on anything** uses the same maths prompt.
+You can still choose **AI** for a Maths subject in the Solo or Battle setup (**Generated** is the default). AI gets a maths-only prompt that asks for problems to work out, with no history or famous-mathematician trivia, and its typed answers are checked by value too. It can still get an answer wrong. Typing a maths topic such as "calculus" into **Quiz me on anything** uses the same maths prompt.
 
 | Subject | Easy | Medium | Hard |
 |---|---|---|---|
@@ -99,9 +96,11 @@ You can still choose **AI** for a Maths subject in the Solo or Battle setup (**G
 - **Every question** comes with a one-line worked solution.
 - **Typed answers** are checked by value, so `-3`, `−3`, `3/4` and `0.75` all work, and `25` is never taken for `2.5`.
 - **Harder problems get more time:** up to twice the normal limit.
-- **Difficulty** is picked in the Solo setup. **Challenge codes** carry the exact problems, so a friend gets the same ones.
+- **Difficulty** is picked in the Solo, Battle and Online setups. **Challenge codes** carry the exact problems, so a friend gets the same ones.
 
 ## Game modes
+
+Every mode plays **20 questions** by default; you can pick 5 or 10 instead. With built-in questions, a subject with fewer than 20 plays all of them. AI and generated maths games can be **Mixed**, **Easy**, **Medium** or **Hard**, and a chosen level is kept for every question.
 
 ### Solo: fastest finger first
 - Every question has its own timer:
@@ -124,10 +123,20 @@ You can still choose **AI** for a Maths subject in the Solo or Battle setup (**G
 ### Battle: 2–4 players on one device
 - Every player logs in with **their own ID** and gets a buzzer key: `Q`, `P`, `Z` or `M`. On touch screens, tap your player card instead.
 - Buzzing before **BUZZ!** is a **false start**, and it locks that player out of the question.
-- The first player to buzz answers with `1`–`4`:
+- The first player to buzz answers with `1`–`4` (or a tap):
   - **Right:** +100 points plus a speed bonus (×2 in a Double points round).
   - **Wrong:** −50 points, and the others can buzz.
 - Battles can use AI or built-in questions.
+- **Mystery boxes** drop on random rounds (see [below](#mystery-boxes-battles-and-online-rooms)). In a battle, you use a power-up after you buzz in.
+
+### Mystery boxes: battles and online rooms
+- About one question in seven gets a **mystery box** (never the first or the last). The banner shows it when the question appears.
+- The **fastest right answer** wins the box. Inside is one random power-up:
+  - **50:50** removes two wrong answers.
+  - **+10 s** adds ten seconds to your clock.
+  - **Skip** passes the question and still gives you half the base points (50, times the difficulty online, ×2 in a Double points round), with no speed bonus. In a battle, the others can still buzz.
+- Power-ups are kept for later questions. Tap one, or press `F` (50:50), `T` (+10 s) or `S` (Skip). Each can be used once per question, before you answer.
+- Online, the host's device checks every power-up, so nobody can use one they didn't win. Everyone sees how many power-ups each player holds on the scoreboard.
 
 ### Online room: friends on their own devices
 1. The host presses **Online** (the Wi-Fi button in the sidebar), picks a subject and presses **Create room**. They get a 5-character code like `K7Q2M`.
@@ -135,13 +144,14 @@ You can still choose **AI** for a Maths subject in the Solo or Battle setup (**G
 3. The host presses **Start game**. Everyone gets the same question at the same moment:
    - A right answer scores **100** plus up to **100** for speed, times the difficulty (and ×2 in a Double points round).
    - A wrong answer or no answer scores 0.
-   - After each question, everyone sees who picked what, the worked answer and the live scoreboard.
+   - After each question, everyone sees who picked what, the worked answer, who won a mystery box and the live scoreboard.
 4. At the end, everyone sees the same podium, and the result is saved to each player's stats. The room stays open, so the host can press **New game, same room** for a rematch.
 
 How it works:
 - **Connection.** The host's browser runs the game. Friends connect straight to it with WebRTC, and PeerJS's free public server is only used to find each other, so there's no server of our own. Everyone needs internet. The first online game downloads the PeerJS library (about 30 KB) from jsDelivr.
 - **Questions.** The host's device picks them: built-in, generated maths, or the host's own AI. Friends don't need AI or an API key. Online games use multiple-choice and true/false questions.
-- **Fairness.** Answers never leave the host's device until the reveal, and the host checks everything.
+- **Fairness.** Answers never leave the host's device until the reveal, and the host checks everything, including power-ups.
+- **Same version.** Everyone in a room needs the same version of QuizNova. A friend on an older copy is told to update.
 - **Keep the host open.** If the host closes QuizNova, the room closes for everyone. A friend who leaves mid-game drops out, and the others keep playing.
 - **If a friend can't connect:** check the code, then try again. Some school, office or mobile networks block this kind of connection. A home Wi-Fi or a phone hotspot usually works.
 
@@ -187,14 +197,20 @@ No build step or install is needed.
 
   Then open <http://localhost:8000>.
 
-Online rooms need an internet connection on every device. Claude questions do too. The first Claude game also downloads the Anthropic JavaScript SDK (about 190 KB) from the jsDelivr CDN. Chrome's free AI works offline once its model is downloaded.
+Online rooms and AI questions need an internet connection. Everything else works offline.
+
+### On a phone
+Open the GitHub Pages address (see [Deploy](#deploy-to-github-pages)) in your phone's browser. To get an app icon, use **Add to Home screen** (Chrome on Android) or **Share → Add to Home Screen** (Safari on iPhone). QuizNova then opens full screen like an app.
 
 ## Keyboard shortcuts
+
+On phones and tablets, everything works with taps instead.
 
 | Where | Keys |
 |---|---|
 | Solo | `1`–`4` or `A`–`D` answer · `Enter` next question |
-| Battle | `Q` `P` `Z` `M` buzz · `1`–`4` or `A`–`D` answer |
+| Battle | `Q` `P` `Z` `M` buzz · `1`–`4` or `A`–`D` answer · `F` `T` `S` power-ups |
+| Online | `1`–`4` or `A`–`D` answer · `F` `T` `S` power-ups |
 
 ## Project structure
 
@@ -202,26 +218,26 @@ Online rooms need an internet connection on every device. Claude questions do to
 Quiz Application/
 ├── index.html      # App shell: sidebar, top bar, dialogs (incl. AI settings)
 ├── assets/
-│   ├── quiznova-logo.webp   # The logo (transparent background)
-│   ├── quiznova-mark.webp   # Round skull-in-Q emblem for the sidebar
-│   └── favicon.png          # Browser-tab icon
+│   ├── quiznova-logo.webp      # The logo (transparent background)
+│   ├── quiznova-mark.webp      # Round skull-in-Q emblem for the sidebar and the home-screen icon
+│   ├── favicon.png             # Browser-tab icon
+│   └── manifest.webmanifest    # Lets phones add QuizNova to the home screen
 ├── css/
-│   └── style.css   # Neumorphic theme (light/dark), layouts, motion & micro-interactions
+│   └── style.css   # Neumorphic theme (light/dark), layouts for PCs, tablets and phones, motion & micro-interactions
 ├── js/
 │   ├── data.js     # Categories, subjects (with AI topics) and the 231 built-in questions
 │   ├── maths.js    # Maths problem generator: arithmetic → calculus, answers worked out by QuizNova
-│   └── app.js      # Accounts, AI question streaming (Chrome AI or Claude), solo and battle engines, challenge codes, stats, logo, motion helpers
+│   └── app.js      # Accounts, AI question streaming (Gemini), solo, battle and online engines, mystery boxes, challenge codes, stats, motion helpers
 ├── Jenkinsfile     # CI pipeline: checkout → validate → package
 └── README.md
 ```
 
 ### How the AI call works (`js/app.js` → `aiGenerate`)
-- **Free option:** Chrome's built-in [Prompt API](https://developer.chrome.com/docs/ai/prompt-api) (`LanguageModel`), with the same JSON schema passed as `responseConstraint`, streamed with `promptStreaming`.
-- **SDK:** it uses the official Anthropic JavaScript SDK (`@anthropic-ai/sdk`) straight from the browser, with `dangerouslyAllowBrowser: true`, because every player brings their own key.
-- **Structured output:** it asks for JSON with `output_config.format` (JSON schema), so every response has the same shape.
-- **Streaming:** it streams the response and pulls out each question the moment its JSON object closes.
-- **Speed:** it uses `effort: "low"`, which is plenty for writing questions and makes the first question arrive faster.
-- **Refusal fallback:** on Claude Opus 5, it enables the server-side refusal fallback (`fallbacks: "default"`).
+- **No library:** it calls the [Gemini API](https://ai.google.dev/gemini-api/docs) straight from the browser with `fetch` (`streamGenerateContent?alt=sse`), sending the player's own key in the `x-goog-api-key` header. Nothing extra is downloaded.
+- **Structured output:** it asks for JSON (`responseMimeType` with a `responseJsonSchema`), so every response has the same shape. The schema puts the fact (`explain`) first, so the model writes the fact before the question.
+- **Streaming:** it reads the server-sent events and pulls out each question the moment its JSON object closes.
+- **Speed:** it sets the lowest useful thinking level (`thinkingConfig.thinkingLevel`: `low` on 3.8 Flash, `minimal` on Flash-Lite; one step more for maths), so the first question arrives fast.
+- **Fallback:** if the chosen model returns "busy", "out of quota" or "not found" before any question arrives, it retries once with the other model.
 
 ## Git and GitHub
 
@@ -248,4 +264,4 @@ It works on Linux and Windows build machines.
 
 ## Deploy to GitHub Pages
 
-Go to **Settings → Pages → Deploy from a branch** and choose `main` and `/ (root)`. AI questions work there too: visitors use Chrome's free AI or their own Claude key.
+Go to **Settings → Pages → Deploy from a branch** and choose `main` and `/ (root)`. AI questions work there too: each visitor adds their own free Gemini key.

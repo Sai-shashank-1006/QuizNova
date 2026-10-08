@@ -4,13 +4,15 @@
  *  - Solo: "fastest finger first" — every question is timed; faster correct answers score more.
  *    Power-ups (50:50, +10 s, Skip) and surprise bonus rounds (Double, Lightning, Mystery box).
  *  - Battle: 2–4 logged-in players share one keyboard; the first to buzz in (Q / P / Z / M) answers.
+ *  - Online rooms: friends on their own devices answer the same question at the same time.
+ *    Battles and online rooms drop mystery boxes: the fastest right answer wins a power-up (50:50, +10 s or Skip).
  *  - Challenge codes: a finished solo run (questions included) is packed into a code that anyone
  *    with QuizNova can replay on their own device — no server needed.
  *
- * Questions come from AI (Claude with the player's own key, or Chrome's built-in AI) or from the built-in bank.
+ * Questions come from AI (Google's Gemini, with the player's own free API key) or from the built-in bank.
  * AI questions stream in one at a time, so a game starts as soon as the first question is written. AI rounds
- * never mix in built-in questions. For subjects with checked film data (TFI), QuizNova picks the questions and
- * the AI only rewrites their wording.
+ * never mix in built-in questions, and a chosen difficulty is never mixed either. For subjects with checked film
+ * data (TFI), QuizNova picks the questions and the AI only rewrites their wording.
  *
  * Player IDs, hashed passwords, game history and the API key are stored in this browser's localStorage.
  */
@@ -36,23 +38,38 @@
     double: { label: 'Double points', icon: 'bolt', text: 'Every point on this question counts twice.' },
     lightning: { label: 'Lightning round', icon: 'clock', text: 'Half the time — but triple points!' },
     mystery: { label: 'Mystery box', icon: 'gift', text: 'Get it right to reveal a secret ×1–×4 multiplier.' },
+    box: { label: 'Mystery box', icon: 'gift', text: 'The fastest right answer wins a power-up: 50:50, +10 s or Skip.' },
   };
+  // Power-ups won from mystery boxes in battles and online rooms. Skip passes the question for half the base points.
+  const ITEMS = {
+    fifty: { label: '50:50', icon: 'half', key: 'F', text: 'removes two wrong answers' },
+    time: { label: '+10 s', icon: 'timer', key: 'T', text: 'adds ten seconds to your clock' },
+    skip: { label: 'Skip', icon: 'skip', key: 'S', text: 'passes the question for half points' },
+  };
+  const ITEM_KEYS = Object.keys(ITEMS);
+  const noItems = () => ({ fifty: 0, time: 0, skip: 0 });
+  const DIFFS = ['mixed', 'easy', 'medium', 'hard'];
+  const COUNTS = [5, 10, 20];
   const QUIPS_OK = ['Nailed it!', 'Big brain!', 'Too fast!', 'Legendary!', 'Gum-Gum genius!', 'Believe it!', 'Clean hit!', 'Sharp!', 'Easy peasy!'];
   const QUIPS_BAD = ['Oof!', 'So close!', 'Plot twist!', 'Not this time!', 'Shake it off!'];
   const BUZZ_KEYS = ['Q', 'P', 'Z', 'M'];
   const BT = { intro: 3000, read: 2500, open: 12000, answer: 6000, reveal: 2600 }; // battle phase lengths (ms)
   const K = {
     accounts: 'qn.accounts', current: 'qn.current', games: 'qn.games', prefs: 'qn.prefs', theme: 'qn.theme',
-    ai: 'qn.ai', seen: 'qn.seen', aiHist: 'qn.aihist',
+    ai: 'qn.gemini', seen: 'qn.seen', aiHist: 'qn.aihist',
   };
   const ID_RE = /^[A-Za-z0-9_-]{3,16}$/;
+  // Gemini models (both on Google's free tier). `think` is the thinking level for quiz questions and for maths:
+  // as little as each model allows for trivia so the first question arrives fast, a bit more to work maths out.
   const AI_MODELS = {
-    'claude-opus-5': { label: 'Claude Opus 5', note: 'Best quality', cents: 4 },
-    'claude-sonnet-5': { label: 'Claude Sonnet 5', note: 'Faster and cheaper', cents: 2 },
-    'claude-haiku-4-5': { label: 'Claude Haiku 4.5', note: 'Fastest and cheapest', cents: 1 },
+    'gemini-3.8-flash': { label: 'Gemini 3.8 Flash', short: '3.8 Flash', note: 'Most precise', think: 'low', mathsThink: 'medium' },
+    'gemini-3.5-flash-lite': { label: 'Gemini 3.5 Flash-Lite', short: 'Flash-Lite', note: 'Fastest', think: 'minimal', mathsThink: 'low' },
   };
-  const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.128.0/+esm';
+  const DEFAULT_MODEL = 'gemini-3.8-flash';
+  const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  // Slow devices (set in index.html) get fewer decorative effects.
+  const lite = document.documentElement.classList.contains('lite');
   const darkScheme = matchMedia('(prefers-color-scheme: dark)');
 
   /* ================= Icons ================= */
@@ -242,8 +259,7 @@
     user: null,
     view: 'auth',
     cat: 'all',
-    prefs: Object.assign({ subject: 'onepiece', count: 10, speed: 'classic', rounds: 8, difficulty: 'hard', sound: true }, store.get(K.prefs, {})),
-    nano: { status: 'unknown', progress: 0 },
+    prefs: Object.assign({ subject: 'onepiece', count: 20, speed: 'classic', rounds: 20, difficulty: 'hard', sound: true }, store.get(K.prefs, {})),
     game: null,
     roster: [],
     battleSubject: null,
@@ -255,66 +271,27 @@
   };
   const savePrefs = () => store.set(K.prefs, S.prefs);
   if (!SUBJ[S.prefs.subject] || SUBJ[S.prefs.subject].hidden) S.prefs.subject = 'onepiece';
-  if (S.prefs.v !== 2) { S.prefs.difficulty = 'hard'; S.prefs.v = 2; savePrefs(); } // new default: hard questions
+  if (S.prefs.v !== 3) { // v3: 20-question games by default (v2 made hard the default difficulty)
+    if (S.prefs.v !== 2) S.prefs.difficulty = 'hard';
+    Object.assign(S.prefs, { count: 20, rounds: 20, v: 3 });
+    savePrefs();
+  }
+  if (!COUNTS.includes(S.prefs.count)) S.prefs.count = 20;
+  if (!COUNTS.includes(S.prefs.rounds)) S.prefs.rounds = 20;
+  if (!DIFFS.includes(S.prefs.difficulty)) S.prefs.difficulty = 'hard';
+  store.del('qn.ai'); // settings for the old AI options (Claude, Chrome's built-in AI): no longer used
 
   /* ================= AI settings ================= */
-  // provider: 'claude' (the player's Anthropic API key) or 'chrome' (Chrome's free on-device model).
+  // Google's Gemini, with the player's own API key (free from Google AI Studio).
   function aiCfg() {
     const c = store.get(K.ai, {}) || {};
-    const key = typeof c.key === 'string' ? c.key : '';
-    return {
-      provider: c.provider === 'claude' || c.provider === 'chrome' ? c.provider : key ? 'claude' : 'chrome',
-      key,
-      model: AI_MODELS[c.model] ? c.model : 'claude-opus-5',
-    };
+    return { key: typeof c.key === 'string' ? c.key : '', model: AI_MODELS[c.model] ? c.model : DEFAULT_MODEL };
   }
-  const aiReady = () => {
-    const c = aiCfg();
-    return c.provider === 'claude' ? !!c.key : S.nano.status === 'available';
-  };
-  const aiLabel = () => { const c = aiCfg(); return c.provider === 'claude' ? AI_MODELS[c.model].label : 'Chrome’s free AI'; };
+  const aiReady = () => !!aiCfg().key;
+  const aiLabel = () => AI_MODELS[aiCfg().model].label;
   const defaultSource = subject => isGen(subject) ? 'local' : aiReady() || !hasLocal(subject) ? 'ai' : 'local';
   // Subjects with checked film data (data.js FILMS): AI rounds take their questions from it (see startFilmFeed).
   const filmsFor = id => (D.FILMS && D.FILMS[id]) || null;
-
-  /* ---------- Chrome's built-in AI (Gemini Nano, runs on this PC) ---------- */
-  const NANO_OPTS = { expectedInputs: [{ type: 'text', languages: ['en'] }], expectedOutputs: [{ type: 'text', languages: ['en'] }] };
-  const nanoSupported = () => typeof window.LanguageModel === 'function' || typeof window.LanguageModel === 'object';
-  async function checkNano() {
-    let status = 'unsupported';
-    if (nanoSupported()) {
-      try { status = await LanguageModel.availability(NANO_OPTS); }
-      catch { try { status = await LanguageModel.availability(); } catch { status = 'unavailable'; } }
-    }
-    S.nano.status = status;
-    return status;
-  }
-  // Must run straight from a click: Chrome only starts the model download with a user gesture.
-  async function downloadNano(btn) {
-    if (!nanoSupported()) return;
-    btn.disabled = true;
-    S.nano.status = 'downloading';
-    paintNanoFields();
-    try {
-      const session = await LanguageModel.create({
-        ...NANO_OPTS,
-        monitor(m) { m.addEventListener('downloadprogress', e => { S.nano.progress = e.loaded; paintNanoFields(); }); },
-      });
-      session.destroy();
-      S.nano.status = 'available';
-      const c = aiCfg();
-      store.set(K.ai, { ...c, provider: 'chrome' });
-      aiStatus('Free AI is ready — every game now gets brand-new questions.', 'good');
-      afterAIChange();
-      toast('Free AI is ready — every game now gets brand-new questions!', 'sparkle', 'good');
-    } catch (err) {
-      await checkNano();
-      aiStatus(`Chrome couldn’t set up its built-in AI (${err.name || 'error'}: ${err.message || err}). You can use Claude instead.`, 'bad');
-    } finally {
-      btn.disabled = false;
-      paintNanoFields();
-    }
-  }
 
   /* ================= Sound effects (Web Audio, no files) ================= */
   const SFX = {
@@ -358,6 +335,7 @@
 
   function confetti(count = 70) {
     if (reducedMotion.matches) return;
+    if (lite) count = Math.ceil(count / 3);
     const colors = ['#E0242A', '#17191A', '#F2C94C', '#9CBBAA', '#F4A38C', '#FFFFFF'];
     const layer = document.createElement('div');
     layer.className = 'confetti';
@@ -528,20 +506,48 @@
     store.set(K.seen, all);
     return shuffle(picked, r).map(e => prepQuestion(e.q, r));
   }
-  function bonusFor(seed, kind, i) {
+  function bonusFor(g, i) {
     if (i === 0) return { bonus: null };
-    const r = rng(`${seed}:bonus:${i}`)();
+    if (g.boxAt && g.boxAt.has(i)) return { bonus: 'box' };
+    const r = rng(`${g.seed}:bonus:${i}`)();
     if (r < 0.14) return { bonus: 'double' };
-    if (kind === 'solo' && r < 0.24) return { bonus: 'lightning' };
-    if (kind === 'solo' && r < 0.32) return { bonus: 'mystery', mystery: 1 + Math.floor(rng(`${seed}:mystery:${i}`)() * 4) };
+    if (g.kind === 'solo' && r < 0.24) return { bonus: 'lightning' };
+    if (g.kind === 'solo' && r < 0.32) return { bonus: 'mystery', mystery: 1 + Math.floor(rng(`${g.seed}:mystery:${i}`)() * 4) };
     return { bonus: null };
   }
   const bonusMult = q => q.bonus === 'double' ? 2 : q.bonus === 'lightning' ? 3 : q.bonus === 'mystery' ? (q.mystery || 1) : 1;
+  // Battles and online rooms: mystery boxes drop on random questions (about one per 7, never the first or the last,
+  // so a power-up won from one can still be used).
+  function boxSlots(n, seed) {
+    const r = rng(`${seed}:boxes`), slots = Array.from({ length: Math.max(0, n - 2) }, (_, k) => k + 1);
+    return new Set(shuffle(slots, r).slice(0, n >= 4 ? Math.max(1, Math.round(n / 7)) : 0));
+  }
+  // Skip (a power-up) scores half the base points of a right answer, with no speed bonus. Battles score every
+  // difficulty the same; online rooms use the difficulty multiplier.
+  const skipPoints = (q, withDiff = true) => Math.round(50 * (withDiff ? DIFF_MULT[q.difficulty] || 1 : 1) * bonusMult(q));
+  // A mystery box's prize: one random power-up for the winner.
+  function openBox(p) {
+    const item = pick(ITEM_KEYS);
+    p.items[item]++;
+    return { id: p.id, item };
+  }
+  const boxText = w => w.id ? `${w.id} won ${ITEMS[w.item].label} from the mystery box!` : 'Nobody won the mystery box this time.';
+  // Power-up buttons for whoever may use them now (the battle player answering, or you online).
+  function itemBarHTML(items, { who = '', off = {} } = {}) {
+    const have = ITEM_KEYS.filter(k => items[k] > 0);
+    if (!have.length) return '';
+    return `<div class="powerups item-bar" role="group" aria-label="Power-ups${who ? ` for ${esc(who)}` : ''}">
+      ${who ? `<span class="item-who">${icon('gift')}${esc(who)}’s power-ups</span>` : ''}
+      ${have.map(k => `<button class="power" type="button" data-item="${k}" title="${esc(`${ITEMS[k].label}: ${ITEMS[k].text}`)}"${off[k] ? ' disabled' : ''}>${icon(ITEMS[k].icon)}${ITEMS[k].label}${items[k] > 1 ? ` ×${items[k]}` : ''}<kbd>${ITEMS[k].key}</kbd></button>`).join('')}
+    </div>`;
+  }
+  const itemChips = items => ITEM_KEYS.filter(k => items && items[k] > 0).map(k => `<i class="item-chip">${ITEMS[k].label}${items[k] > 1 ? ` ×${items[k]}` : ''}</i>`).join('');
+  const ITEM_BY_KEY = Object.fromEntries(ITEM_KEYS.map(k => [ITEMS[k].key, k]));
 
   function addQuestions(g, list) {
     for (const q of list) {
       if (g.questions.length >= g.n) break;
-      if (q.bonus === undefined) Object.assign(q, bonusFor(g.seed, g.kind, g.questions.length));
+      if (q.bonus === undefined) Object.assign(q, bonusFor(g, g.questions.length));
       g.questions.push(q);
     }
   }
@@ -549,19 +555,7 @@
     `<optgroup label="${esc(c.name)}">${D.SUBJECTS.filter(s => s.category === c.id && !s.hidden).map(s => `<option value="${s.id}">${esc(s.name)}${s.aiOnly ? ' ✨' : ''}</option>`).join('')}</optgroup>`).join('')
     + (withCustom ? '<optgroup label="Anything"><option value="custom">✨ Any topic — type it</option></optgroup>' : '');
 
-  /* ================= AI questions (Claude) ================= */
-  let SDK = null;
-  let sdkPromise = null;
-  function loadSDK() {
-    if (!sdkPromise) {
-      sdkPromise = import(SDK_URL)
-        .then(m => { SDK = m.default; return SDK; })
-        .catch(err => { sdkPromise = null; throw Object.assign(new Error('sdk-load'), { cause: err }); });
-    }
-    return sdkPromise;
-  }
-  const aiClient = (Anthropic, key) => new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true, maxRetries: 1, timeout: 120 * 1000 });
-
+  /* ================= AI questions (Gemini) ================= */
   const QUESTION_SCHEMA = {
     type: 'object',
     properties: {
@@ -591,25 +585,29 @@
 
   const AI_SYSTEM = `You write questions for QuizNova, a fast and fun quiz game played by students and friends.
 
-Rules for every question:
-- Every fact must be correct. If you are not certain about a fact, write a different question instead.
+Accuracy comes first:
+- Every fact must be correct and well documented (official sources, encyclopedias). If you are not completely sure of a fact, write a different question.
+- Avoid rumours, fan theories, unreleased or upcoming things, and facts that change over time ("current", "latest", records that may have been broken) unless the question gives the date.
 - Write "explain" first: one true fact (under 20 words) that the question tests. Then write the question and options so that this fact gives the answer.
-- Exactly one answer is correct. Wrong options must be plausible but definitely wrong.
+- Exactly one option is correct. Wrong options are the same kind of thing as the answer (all people, all years, all places…), plausible, and definitely wrong.
 - "correct" is the exact text of the correct option ("True" or "False" for truefalse, the display answer for written); "answer" is its index.
+
+Format:
 - Keep questions under 30 words and options under 8 words. Never use "All of the above" or "None of the above".
 - Never give the answer away inside the question.
 - Vary the style to suit the topic (for trivia: who, what, which, when, how many, "which of these is NOT", quotes, odd-one-out, firsts and records).
 - type "mcq": exactly 4 options; "answer" is the index (0-3) of the correct option; "accept" is [].
 - type "truefalse": options are ["True", "False"]; "answer" is 0 if the statement is true, 1 if false; "accept" is [].
 - type "written": "options" is []; "answer" is 0; "accept" lists every reasonable spelling of the 1-3 word answer, display form first.
-- "difficulty" is easy, medium or hard, judged for a keen fan of the topic.
-- Keep everything friendly for teenagers.
+- "difficulty" is your honest rating for a keen fan of the topic: "easy" if most people who know the topic know it, "medium" if a regular fan knows it, "hard" if only dedicated fans or experts know it.
+- Keep everything friendly for teenagers.`;
 
-Latency-sensitive; begin your visible answer immediately.`;
-
-  // Chrome's small on-device model invents facts when pushed for obscure ones, so it gets safer angles.
-  const SAFE_ANGLES = ['characters and who-did-what', 'places and settings', 'rivalries, villains and big moments',
-    'odd-one-out and "which of these is NOT" questions', 'cause and effect', 'names, nicknames and titles'];
+  // What each difficulty means. A round with one difficulty keeps only the questions the AI rates at that level.
+  const LEVEL_TEXT = {
+    easy: 'easy: something most people who have heard of the topic know',
+    medium: 'medium: something a regular fan knows but a casual one might not',
+    hard: 'hard: a deep cut only dedicated fans or experts know (exact names, numbers, minor characters, specific episodes, chapters, matches or behind-the-scenes facts), never one of the famous facts everyone knows',
+  };
   const AI_ANGLES = ['characters and who-did-what', 'numbers, dates and records', 'famous quotes and catchphrases', 'places and settings',
     'lesser-known facts that real fans love', 'firsts, origins and behind-the-scenes', 'rivalries, villains and big moments',
     'odd-one-out and "which of these is NOT" questions', 'cause and effect', 'names, nicknames and titles'];
@@ -626,12 +624,10 @@ Latency-sensitive; begin your visible answer immediately.`;
     const types = mcqOnly
       ? `All "mcq" with 4 options, except about ${tf} "truefalse" (a worked result that is either right or wrong).`
       : `Mostly "mcq" with 4 options; about ${tf} "truefalse" and about ${written} "written" whose answer is a single number (put it in "accept", e.g. ["12"]).`;
-    const diff = {
-      mixed: 'mixed — roughly a third one-step, a third two-step and a third multi-step problems',
-      easy: 'all easy — one-step problems',
-      medium: 'all medium — two-step problems',
-      hard: 'all hard — multi-step problems a strong student has to work through carefully',
-    }[difficulty] || 'mixed';
+    const steps = { easy: 'easy: a one-step problem', medium: 'medium: a two-step problem', hard: 'hard: a multi-step problem a strong student has to work through carefully' };
+    const diff = steps[difficulty]
+      ? `every problem must be ${steps[difficulty]}. Rate each one honestly in "difficulty" (easy = one step, medium = two steps, hard = several steps): QuizNova throws away any problem that isn't ${difficulty}`
+      : 'mixed, roughly a third one-step (easy), a third two-step (medium) and a third multi-step (hard) problems';
     return [
       `Write ${n} maths problems about ${about}.`,
       'These are problems to solve, not trivia. Every question must need a calculation or working out. Never ask who discovered, invented or named something, and never ask about history, dates or famous mathematicians.',
@@ -652,28 +648,19 @@ Latency-sensitive; begin your visible answer immediately.`;
     const types = mcqOnly
       ? `All "mcq" with 4 options, except about ${tf} "truefalse".`
       : `Mostly "mcq" with 4 options; about ${tf} "truefalse" and about ${written} "written" (answer of 1-3 words).`;
-    const careful = aiCfg().provider === 'chrome';
     // Subjects with a `focus` list get a few random areas per round, so games don't keep circling the same facts.
     const focus = subject !== 'custom' && SUBJ[subject].focus ? shuffle(SUBJ[subject].focus).slice(0, 3) : [];
-    const diff = careful ? {
-      mixed: 'mixed — easy, medium and hard, but only about well-known facts you are completely sure of',
-      easy: 'all easy — things a casual fan knows',
-      medium: 'all medium — things a regular fan knows',
-      hard: 'all hard — for real fans, but only about well-documented facts you are completely sure of',
-    }[difficulty] || 'mixed' : {
-      mixed: 'mixed — roughly a third easy, a third medium and a third hard',
-      easy: 'all easy — things a casual fan knows',
-      medium: 'all medium — things a regular fan knows',
-      hard: 'all hard — deep cuts only real experts know, but still clearly true and checkable',
-    }[difficulty] || 'mixed';
+    const fixed = !!LEVEL_TEXT[difficulty];
+    const diff = fixed
+      ? `every question must be ${LEVEL_TEXT[difficulty]}. Rate each one honestly in "difficulty": QuizNova throws away any question that isn't ${difficulty}`
+      : 'mixed, roughly a third easy, a third medium and a third hard';
     return [
       `Write ${n} quiz questions about ${about}.`,
       focus.length ? `This round, put most of the questions on: ${focus.join('; ')}.` : '',
       `Difficulty: ${diff}.`,
-      `Types: ${types} Mix up the order of types and difficulties.`,
-      careful ? 'Only use facts you are completely sure of. A simple question that is right beats a clever one that is wrong.'
-        : difficulty === 'easy' ? '' : 'Skip the famous, overused facts everyone already knows. Surprise the player with lesser-known facts that are still true.',
-      `For variety this round, lean into: ${shuffle(careful ? SAFE_ANGLES : AI_ANGLES).slice(0, 2).join(' and ')}.`,
+      `Types: ${types} Mix up the order of ${fixed ? 'the types' : 'types and difficulties'}.`,
+      difficulty === 'easy' ? '' : 'Skip the famous, overused facts everyone already knows. Surprise the player with lesser-known facts that are still true.',
+      `For variety this round, lean into: ${shuffle(AI_ANGLES).slice(0, 2).join(' and ')}.`,
       avoid.length ? `These were asked recently (question → answer). Do not ask any of them again, reworded or not, and do not test the same facts:\n${avoid.map(a => `- ${a}`).join('\n')}` : '',
       `Round id: ${uid()}`,
     ].filter(Boolean).join('\n\n');
@@ -708,65 +695,89 @@ Latency-sensitive; begin your visible answer immediately.`;
     };
   }
 
-  // Streams questions from the chosen AI, calling onQuestion(raw) for each one as it completes. A spec can bring its
-  // own prompt, JSON schema and system prompt (used to reword checked questions); otherwise it asks for new questions.
-  function aiGenerate(spec, onQuestion, signal) {
-    return aiCfg().provider === 'chrome' ? nanoGenerate(spec, onQuestion, signal) : claudeGenerate(spec, onQuestion, signal);
-  }
-
-  // Chrome's built-in model, streamed with the same JSON schema.
-  async function nanoGenerate(spec, onQuestion, signal) {
-    if (!nanoSupported()) throw Object.assign(new Error('nano-missing'), { nano: true });
-    const session = await LanguageModel.create({ ...NANO_OPTS, initialPrompts: [{ role: 'system', content: spec.system || AI_SYSTEM }], signal });
-    try {
-      const stream = session.promptStreaming(spec.prompt || aiPrompt(spec), { responseConstraint: spec.schema || QUESTION_SCHEMA, signal });
-      const parser = createQuestionParser(onQuestion);
-      let first = null, mode = null, acc = '';
-      for await (const chunk of stream) {
-        // Some Chrome versions stream the whole answer so far, newer ones only the new part: detect which.
-        if (first === null) { first = chunk; acc = chunk; parser.push(chunk); continue; }
-        if (mode === null) mode = chunk.length >= acc.length && chunk.startsWith(acc) ? 'total' : 'delta';
-        if (mode === 'total') { parser.push(chunk.slice(acc.length)); acc = chunk; }
-        else { parser.push(chunk); acc += chunk; }
-      }
-    } finally {
-      session.destroy();
-    }
-  }
-
-  async function claudeGenerate(spec, onQuestion, signal) {
+  // Streams questions from Gemini, calling onQuestion(raw) for each one as it completes. A spec can bring its own
+  // prompt, JSON schema and system prompt (used to reword checked questions); otherwise it asks for new questions.
+  // If the chosen model is out of free quota, busy or unavailable before anything arrives, the other model takes
+  // over (spec.onModel hears which).
+  async function aiGenerate(spec, onQuestion, signal) {
     const cfg = aiCfg();
     if (!cfg.key) throw new Error('no-key');
-    const Anthropic = await loadSDK();
-    const client = aiClient(Anthropic, cfg.key);
-    const params = {
-      model: cfg.model,
-      max_tokens: 16000,
-      system: spec.system || AI_SYSTEM,
-      messages: [{ role: 'user', content: spec.prompt || aiPrompt(spec) }],
-      output_config: { format: { type: 'json_schema', schema: spec.schema || QUESTION_SCHEMA } },
-    };
-    // Question writing is routine work: low effort keeps the first question fast; maths gets more room to work
-    // the answers out (effort isn't supported on Haiku 4.5).
-    if (cfg.model !== 'claude-haiku-4-5') params.output_config.effort = isMathsSpec(spec) ? 'medium' : 'low';
-    const stream = cfg.model === 'claude-opus-5'
-      ? client.beta.messages.stream({ ...params, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' }, { signal })
-      : client.messages.stream(params, { signal });
-    // Ask for the final message up front so a mid-stream failure is always handled (rethrown below).
-    const final = stream.finalMessage();
-    final.catch(() => {});
-    const parser = createQuestionParser(onQuestion);
-    let textBlocks = 0;
-    for await (const event of stream) {
-      if (event.type === 'content_block_start' && event.content_block.type === 'text') {
-        if (textBlocks++ > 0) parser.reset(); // a fallback model restarts the answer in a new text block
-      } else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-        parser.push(event.delta.text);
+    const req = { prompt: spec.prompt || aiPrompt(spec), system: spec.system || AI_SYSTEM, schema: spec.schema || QUESTION_SCHEMA, maths: isMathsSpec(spec) };
+    const models = [cfg.model, ...Object.keys(AI_MODELS).filter(m => m !== cfg.model)];
+    let got = 0;
+    for (let k = 0, think = true; ;) {
+      try {
+        return await geminiStream(cfg.key, models[k], { ...req, think }, raw => { got++; onQuestion(raw); }, signal);
+      } catch (err) {
+        if (got) throw err;
+        // A model that stops accepting the thinking setting still works without it.
+        if (think && err.status === 400 && /thinking/i.test(err.message)) { think = false; continue; }
+        if (k + 1 >= models.length || ![404, 429, 500, 503].includes(err.status)) throw err;
+        k++;
+        think = true;
+        if (spec.onModel) spec.onModel(models[k]);
       }
     }
-    const message = await final;
-    if (message.stop_reason === 'refusal') throw Object.assign(new Error('refusal'), { refusal: true });
-    return message;
+  }
+
+  async function geminiStream(key, model, { prompt, system, schema, maths, think }, emit, signal) {
+    const generationConfig = { responseMimeType: 'application/json', responseJsonSchema: schema, maxOutputTokens: 16384 };
+    if (think) generationConfig.thinkingConfig = { thinkingLevel: maths ? AI_MODELS[model].mathsThink : AI_MODELS[model].think };
+    let res;
+    try {
+      res = await fetch(`${GEMINI_URL}/${model}:streamGenerateContent?alt=sse`, {
+        method: 'POST',
+        signal,
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig,
+        }),
+      });
+    } catch (err) {
+      if (err.name === 'AbortError') throw err;
+      throw Object.assign(new Error('network'), { network: true });
+    }
+    if (!res.ok) throw await geminiError(res);
+    // Server-sent events: one JSON chunk per "data:" line. Thought parts (if any) are skipped.
+    const parser = createQuestionParser(emit);
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = '', stopped = '', sent = 0;
+    const onLine = text => {
+      if (!text.startsWith('data:')) return;
+      let chunk;
+      try { chunk = JSON.parse(text.slice(5)); } catch { return; }
+      if (chunk.error) throw Object.assign(new Error(chunk.error.message || 'stream error'), { gemini: true, status: chunk.error.code || 500 });
+      if (chunk.promptFeedback && chunk.promptFeedback.blockReason) stopped = chunk.promptFeedback.blockReason;
+      const cand = chunk.candidates && chunk.candidates[0];
+      if (!cand) return;
+      for (const part of (cand.content && cand.content.parts) || []) {
+        if (typeof part.text === 'string' && part.text && !part.thought) { sent++; parser.push(part.text); }
+      }
+      if (cand.finishReason && !['STOP', 'MAX_TOKENS', 'FINISH_REASON_UNSPECIFIED'].includes(cand.finishReason)) stopped = cand.finishReason;
+    };
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split(/\r?\n/);
+        buf = lines.pop();
+        lines.forEach(onLine);
+      }
+      onLine((buf + dec.decode()).trim());
+    } finally {
+      reader.cancel().catch(() => {});
+    }
+    if (stopped && !sent) throw Object.assign(new Error(stopped), { blocked: stopped });
+  }
+
+  async function geminiError(res) {
+    let e = {};
+    try { e = (await res.json()).error || {}; } catch { /* not JSON */ }
+    const reason = ((e.details || []).find(d => d && d.reason) || {}).reason || '';
+    return Object.assign(new Error(e.message || `HTTP ${res.status}`), { gemini: true, status: res.status, apiStatus: e.status || '', reason });
   }
 
   // An AI question whose own parts disagree (its "correct" text, its explanation and the answer it marked)
@@ -828,28 +839,19 @@ Latency-sensitive; begin your visible answer immediately.`;
 
   function aiErrorInfo(err) {
     if (!err) return null;
-    if (err.name === 'AbortError' || (SDK && SDK.APIUserAbortError && err instanceof SDK.APIUserAbortError)) return null;
-    if (err.message === 'no-key') return { msg: 'Add your Anthropic API key in AI settings to use AI questions.', key: true };
-    if (err.message === 'sdk-load') return { msg: 'Couldn’t load the AI library — check your internet connection.' };
-    if (err.message === 'nano-missing') return { msg: 'This browser doesn’t have Chrome’s built-in AI — choose Claude in AI settings.', key: true };
-    if (typeof DOMException !== 'undefined' && err instanceof DOMException) {
-      if (err.name === 'NotAllowedError') return { msg: 'Chrome blocked its built-in AI — open AI settings to turn it on again.', key: true };
-      if (err.name === 'NotSupportedError') return { msg: 'Chrome’s built-in AI can’t run here — choose Claude in AI settings.', key: true };
-      if (err.name === 'QuotaExceededError') return { msg: 'That request was too big for Chrome’s built-in AI — try fewer questions.' };
-      return { msg: `Chrome’s built-in AI had a problem (${err.name}) — try again.` };
-    }
-    if (err.refusal) return { msg: 'Claude declined to write questions on that topic — try a different one.' };
-    if (SDK) {
-      if (err instanceof SDK.AuthenticationError) return { msg: 'Your API key was rejected — check it in AI settings.', key: true };
-      if (err instanceof SDK.PermissionDeniedError) return { msg: 'Your API key can’t use this model — choose another in AI settings.', key: true };
-      if (err instanceof SDK.NotFoundError) return { msg: 'That model isn’t available for your key — choose another in AI settings.', key: true };
-      if (err instanceof SDK.RateLimitError) return { msg: 'You’ve hit your API rate limit — wait a minute and try again.' };
-      if (err instanceof SDK.APIConnectionError) return { msg: 'Couldn’t reach Anthropic — check your internet connection.' };
-      if (err instanceof SDK.InternalServerError) return { msg: 'Anthropic is busy right now — try again shortly.' };
-      if (err instanceof SDK.APIError) {
-        if (err.status === 402 || err.type === 'billing_error') return { msg: 'Your Anthropic account is out of credit.', key: true };
-        return { msg: `AI error ${err.status ?? ''}: ${err.message}` };
-      }
+    if (err.name === 'AbortError') return null;
+    if (err.message === 'no-key') return { msg: 'Add your free Gemini API key in AI settings to use AI questions.', key: true };
+    if (err.network) return { msg: 'Couldn’t reach Gemini — check your internet connection.' };
+    if (err.blocked) return { msg: 'Gemini wouldn’t write questions on that topic — try a different one.' };
+    if (err.gemini) {
+      const s = err.status;
+      if (err.reason === 'API_KEY_INVALID' || s === 401) return { msg: 'Your Gemini API key was rejected — check it in AI settings.', key: true };
+      if (err.apiStatus === 'FAILED_PRECONDITION') return { msg: `Gemini can’t be used from here: ${err.message}`, key: true };
+      if (s === 403) return { msg: 'Google refused your key — check its restrictions in Google AI Studio, or create a new key.', key: true };
+      if (s === 404) return { msg: 'That Gemini model isn’t available for your key — pick the other model in AI settings.', key: true };
+      if (s === 429) return { msg: 'You’ve hit Gemini’s free usage limit — wait a minute and try again. If it keeps happening, today’s free quota is used up.' };
+      if (s >= 500) return { msg: 'Gemini is busy right now — try again in a moment.' };
+      return { msg: `Gemini error ${s}: ${err.message}` };
     }
     return { msg: `AI error: ${err.message || err}` };
   }
@@ -867,7 +869,7 @@ Latency-sensitive; begin your visible answer immediately.`;
     const add = questions.filter(q => q.ai || q.key).map(histEntry);
     if (!add.length) return;
     const h = store.get(K.aiHist, {}) || {};
-    h[key] = [...aiHistory(key).filter(e => !add.some(x => x.q === e.q)), ...add].slice(-150);
+    h[key] = [...aiHistory(key).filter(e => !add.some(x => x.q === e.q)), ...add].slice(-200);
     store.set(K.aiHist, h);
   }
 
@@ -919,7 +921,7 @@ Latency-sensitive; begin your visible answer immediately.`;
   const FILM_KINDS = {
     easy: ['director', 'heroine', 'byRole'],
     medium: ['director', 'heroine', 'byRole', 'year', 'role'],
-    hard: ['music', 'role', 'cast', 'banner', 'byDirector', 'first', 'remake', 'year'],
+    hard: ['music', 'role', 'cast', 'banner', 'byDirector', 'first', 'remake'],
   };
   const KIND_LEVEL = {
     director: 'medium', heroine: 'medium', byRole: 'medium', year: 'medium',
@@ -1032,7 +1034,7 @@ Latency-sensitive; begin your visible answer immediately.`;
         if (pass === 0 && out.some(q => q.film === f.title)) continue;
         const q = filmQuestion(kind, f, films, r);
         if (!q || out.some(o => o.key === q.key) || (pass < 2 && used.has(q.key))) continue;
-        out.push({ ...q, film: f.title, difficulty: difficulty === 'easy' ? 'easy' : q.difficulty });
+        out.push({ ...q, film: f.title, difficulty: FILM_KINDS[difficulty] ? difficulty : q.difficulty }); // a chosen difficulty is never mixed
       }
     }
     return out;
@@ -1072,6 +1074,14 @@ Latency-sensitive; begin your visible answer immediately.`;
       && q.need.every(w => says(t, w)) && !says(t, q.options[q.answer]);
   }
 
+  // When the chosen Gemini model is out of free quota or busy, the other one writes the round (see aiGenerate).
+  const modelSwitch = g => m => {
+    if (S.game !== g) return;
+    g.feed.model = AI_MODELS[m].label;
+    $$('[data-feed-model]').forEach(el => { el.textContent = g.feed.model; });
+    toast(`${aiLabel()} is busy or out of free quota, so ${AI_MODELS[m].label} is writing this round.`, 'sparkle');
+  };
+
   // AI rounds for subjects with film data: QuizNova picks checked questions and the AI rewrites their wording.
   function startFilmFeed(g, spec, films) {
     const ctrl = new AbortController();
@@ -1098,7 +1108,7 @@ Latency-sensitive; begin your visible answer immediately.`;
       g.feed.done = true;
       onFeedProgress(g);
     };
-    aiGenerate({ ...spec, prompt: rewritePrompt(picks), schema: REWRITE_SCHEMA, system: REWRITE_SYSTEM }, raw => {
+    aiGenerate({ ...spec, prompt: rewritePrompt(picks), schema: REWRITE_SCHEMA, system: REWRITE_SYSTEM, onModel: modelSwitch(g) }, raw => {
       const q = raw && Number.isInteger(raw.id) ? picks[raw.id - 1] : null;
       if (!q || taken.has(q)) return;
       take(q, keepsMeaning(raw.question, q) ? raw.question.trim() : null);
@@ -1107,30 +1117,32 @@ Latency-sensitive; begin your visible answer immediately.`;
   }
 
   // Starts streaming AI questions into a game. AI rounds never mix in built-in questions: if the AI comes up short
-  // (after repeats and doubtful questions are thrown away), it's asked once more, and after that the round is shorter.
+  // (after repeats, doubtful questions and ones at the wrong difficulty are thrown away), it's asked once more, and
+  // after that the round is shorter.
   function startFeed(g, spec) {
     const films = filmsFor(spec.subject);
     if (films) { startFilmFeed(g, spec, films); return; }
     const ctrl = new AbortController();
-    const cfg = aiCfg();
-    g.feed = { done: false, error: null, errorKey: false, abort: ctrl, model: aiLabel(), rejected: 0, unsure: 0, more: null };
+    g.feed = { done: false, error: null, errorKey: false, abort: ctrl, model: aiLabel(), rejected: 0, unsure: 0, offLevel: 0, more: null };
     const key = histKey(spec.subject, spec.topic);
     const maths = isMathsSpec(spec);
-    // Chrome's AI often leaves correct spellings out of typed answers, so it only writes choice questions.
-    const mcqOnly = spec.mcqOnly || cfg.provider === 'chrome';
+    const mcqOnly = !!spec.mcqOnly;
+    // A chosen difficulty is never mixed: questions the AI rates at another level are thrown away.
+    const level = LEVEL_TEXT[spec.difficulty] ? spec.difficulty : null;
     const offTopic = offTopicTest(spec.subject);
     const run = want => {
       const history = aiHistory(key); // includes this game's questions when asking again
       // The most recent questions, with their answers, go to the AI as "don't ask these again".
-      const avoid = history.slice(cfg.provider === 'chrome' ? -20 : -50).map(e => e.a ? `${e.q.slice(0, 90)} → ${e.a.slice(0, 40)}` : e.q.slice(0, 90));
-      // Ask for spares so repeats and doubtful questions can be thrown away (more once there's history to clash
-      // with), then stop as soon as the game is full.
-      const ask = Math.min(want + (history.length ? 6 : 4), 16);
-      aiGenerate({ ...spec, mcqOnly, n: ask, avoid }, raw => {
+      const avoid = history.slice(-80).map(e => e.a ? `${e.q.slice(0, 90)} → ${e.a.slice(0, 40)}` : e.q.slice(0, 90));
+      // Ask for spares so repeats, doubtful questions and ones at the wrong level can be thrown away (more once
+      // there's history to clash with), then stop as soon as the game is full.
+      const ask = Math.min(want + (history.length ? 6 : 4) + (level ? 4 : 0), 30);
+      aiGenerate({ ...spec, mcqOnly, n: ask, avoid, onModel: modelSwitch(g) }, raw => {
         if (S.game !== g || g.questions.length >= g.n) return;
         const q = normalizeAI(raw, mcqOnly, maths);
         if (q === UNSURE) { g.feed.unsure++; return; }
         if (!q || (offTopic && offTopic(q))) return;
+        if (level && q.difficulty !== level) { g.feed.offLevel++; return; }
         const e = histEntry(q);
         if (g.questions.some(o => sameQuestion(histEntry(o), e)) || history.some(h => sameQuestion(h, e))) { g.feed.rejected++; return; }
         addQuestions(g, [q]);
@@ -1160,6 +1172,7 @@ Latency-sensitive; begin your visible answer immediately.`;
       } else {
         const msg = g.feed.error || (g.feed.rejected
           ? 'The AI only came up with questions you’ve already had — try again, or pick another difficulty or topic.'
+          : g.feed.offLevel ? 'The AI couldn’t write questions at that difficulty for this topic — try again, or pick another difficulty.'
           : 'The AI didn’t send any usable questions — try again.');
         if (g.kind === 'online') { onlineAbort(msg); return; }
         stopGame();
@@ -1252,7 +1265,7 @@ Latency-sensitive; begin your visible answer immediately.`;
         p = JSON.parse(m[1] ? new TextDecoder().decode(bytes) : await inflate(bytes));
       } catch { return { error: 'This code couldn’t be read — copy it again.' }; }
       if (!validPayload(p) || p.v !== 2 || !Array.isArray(p.q)) return { error: 'This challenge code isn’t valid.' };
-      const questions = p.q.slice(0, 10).map(decodeQ);
+      const questions = p.q.slice(0, 20).map(decodeQ);
       if (!questions.length || questions.some(q => !q)) return { error: 'This challenge code isn’t valid.' };
       p.tp = typeof p.tp === 'string' ? p.tp.slice(0, 60) : '';
       p.n = questions.length;
@@ -1310,9 +1323,8 @@ Latency-sensitive; begin your visible answer immediately.`;
   }
   function paintAIChip() {
     const chip = $('#ai-chip');
-    const cfg = aiCfg(), on = aiReady();
-    const label = !on ? (S.nano.status === 'downloading' && cfg.provider === 'chrome' ? `AI ${Math.round(S.nano.progress * 100)}%` : 'AI off')
-      : cfg.provider === 'claude' ? `AI · ${AI_MODELS[cfg.model].label.replace('Claude ', '')}` : 'AI · Free';
+    const on = aiReady();
+    const label = on ? `AI · ${AI_MODELS[aiCfg().model].short}` : 'AI off';
     chip.classList.toggle('on', on);
     chip.innerHTML = `${icon('sparkle')}<span>${esc(label)}</span>`;
     chip.setAttribute('aria-label', on ? `AI questions on (${aiLabel()}) — settings` : 'AI questions off — turn on AI');
@@ -1412,11 +1424,11 @@ Latency-sensitive; begin your visible answer immediately.`;
       <section class="auth-hero">
         ${bigLogo()}
         <h1>Test what you know.<br><span>Beat who you know.</span></h1>
-        <p class="lede">Fastest-finger solo runs, same-device battles and challenge codes you can send to anyone. AI writes brand-new questions on any topic you like — free with Chrome’s built-in AI, or Claude for the best quality — and there’s a built-in question bank for offline play.</p>
+        <p class="lede">Fastest-finger solo runs, battles with friends and challenge codes you can send to anyone, on your phone or your PC. Google’s Gemini writes brand-new questions on any topic you like (free with your own key), and there’s a built-in question bank for offline play.</p>
         <ul class="auth-points stg">
-          <li><span class="ic-circle red">${icon('sparkle')}</span><span>AI questions on anything<small>New questions every game, on any topic you type.</small></span></li>
+          <li><span class="ic-circle red">${icon('sparkle')}</span><span>AI questions on anything<small>New questions every game, at exactly the difficulty you pick.</small></span></li>
           <li><span class="ic-circle">${icon('bolt')}</span><span>Solo · fastest finger first<small>Power-ups, streaks and surprise bonus rounds.</small></span></li>
-          <li><span class="ic-circle ink">${icon('swords')}</span><span>Battle and challenge codes<small>Buzz in on one keyboard, or send a code to anyone.</small></span></li>
+          <li><span class="ic-circle ink">${icon('swords')}</span><span>Battles, online rooms and challenge codes<small>Win power-ups from mystery boxes, or send a code to anyone.</small></span></li>
         </ul>
       </section>
       <section class="card auth-card" id="auth-main">${authFormHTML('main', mode || (hasIds ? 'login' : 'create'))}</section>
@@ -1469,11 +1481,12 @@ Latency-sensitive; begin your visible answer immediately.`;
     renderHome();
     showView('home');
     toast(isNew ? `Welcome to QuizNova, ${acc.id}!` : `Welcome back, ${acc.id}!`, 'check', 'good');
-    checkNano().then(() => { afterAIChange(); maybePromptAI(); });
+    paintAIChip();
+    maybePromptAI();
   }
   // Offer to turn on AI once per browser session while it's off.
   function maybePromptAI() {
-    if (!S.user || aiReady() || S.nano.status === 'downloading' || S.view !== 'home' || $('dialog[open]')) return;
+    if (!S.user || aiReady() || S.view !== 'home' || $('dialog[open]')) return;
     try {
       if (sessionStorage.getItem('qn.aiAsked')) return;
       sessionStorage.setItem('qn.aiAsked', '1');
@@ -1575,7 +1588,7 @@ Latency-sensitive; begin your visible answer immediately.`;
       <div class="card ai-banner" role="note">
         <span class="ic-circle red">${icon('sparkle')}</span>
         <div><b>You’re playing the built-in questions — only a small set per subject, so they repeat.</b>
-          <small>${S.nano.status === 'downloading' ? `The free AI is downloading (${Math.round(S.nano.progress * 100)}%) — new questions start as soon as it’s done.` : 'Turn on AI for brand-new, harder questions every game. It’s free with Chrome’s built-in AI, or use Claude for the best quality.'}</small></div>
+          <small>Turn on AI for brand-new questions every game, at exactly the difficulty you pick. It’s free: you only need a Gemini key from your Google account.</small></div>
         <button class="btn btn-red" type="button" data-action="ai-settings">${icon('sparkle')}Turn on AI</button>
       </div>`;
     const tabs = [`<button class="tab" type="button" role="tab" data-cat="all" aria-selected="${S.cat === 'all'}">All</button>`,
@@ -1607,13 +1620,13 @@ Latency-sensitive; begin your visible answer immediately.`;
           <div class="subject-grid" id="subject-grid"></div>
         </section>
         <aside class="home-side stg" aria-label="Shortcuts">
-          <button class="card link-card ai-link${on ? ' on' : ''}" type="button" data-action="ai-settings"><span class="ic-circle ${on ? 'red' : ''}">${icon('sparkle')}</span><b>AI questions</b><span class="arrow">${icon('arrowUR')}</span><small>${on ? `On · ${esc(label)} writes new questions every game.` : 'Off · turn on free AI (or Claude) for unlimited new questions.'}</small></button>
+          <button class="card link-card ai-link${on ? ' on' : ''}" type="button" data-action="ai-settings"><span class="ic-circle ${on ? 'red' : ''}">${icon('sparkle')}</span><b>AI questions</b><span class="arrow">${icon('arrowUR')}</span><small>${on ? `On · ${esc(label)} writes new questions every game.` : 'Off · add a free Gemini key for unlimited new questions.'}</small></button>
           <div class="mini-row">
             <button class="card mini" type="button" data-nav="leaderboard"><span class="ic-circle">${icon('trophy')}</span>Hall of Fame</button>
             <button class="card mini" type="button" data-action="help"><span class="ic-circle">${icon('help')}</span>How to play</button>
           </div>
           <button class="card link-card online-link" type="button" data-nav="online"><span class="ic-circle red">${icon('wifi')}</span><b>Play online</b><span class="arrow">${icon('arrowUR')}</span><small>Friends on their own phones — same question, live scoreboard.</small></button>
-          <button class="card link-card" type="button" data-nav="battle"><span class="ic-circle">${icon('swords')}</span><b>Battle mode</b><span class="arrow">${icon('arrowUR')}</span><small>2–4 players on one keyboard — first to buzz answers.</small></button>
+          <button class="card link-card" type="button" data-nav="battle"><span class="ic-circle">${icon('swords')}</span><b>Battle mode</b><span class="arrow">${icon('arrowUR')}</span><small>2–4 players on one phone or keyboard — first to buzz answers.</small></button>
           <button class="card link-card" type="button" data-action="open-code"><span class="ic-circle">${icon('ticket')}</span><b>Challenge code</b><span class="arrow">${icon('arrowUR')}</span><small>Replay the exact questions a friend played.</small></button>
           <button class="card link-card" type="button" data-nav="profile"><span class="ic-circle">${icon('chart')}</span><b>Your stats</b><span class="arrow">${icon('arrowUR')}</span><small>Accuracy, streaks and game history.</small></button>
         </aside>
@@ -1636,53 +1649,24 @@ Latency-sensitive; begin your visible answer immediately.`;
   /* ================= AI settings dialog ================= */
   function openAISettings(message, tone = 'bad') {
     const cfg = aiCfg();
-    const nanoOk = !['unsupported', 'unavailable'].includes(S.nano.status);
-    $('#form-ai').elements.provider.value = cfg.key || !nanoOk ? cfg.provider === 'chrome' && nanoOk ? 'chrome' : 'claude' : 'chrome';
     $('#ai-key').value = cfg.key;
     $('#ai-key').type = 'password';
-    $('#ai-model').value = cfg.model;
-    paintAICost();
+    $('#form-ai').elements.model.value = cfg.model;
+    paintModelHint();
     aiStatus(message || '', message ? tone : '');
-    refreshAIForm();
     $$('dialog[open]').forEach(d => { if (d.id !== 'dlg-ai') d.close(); });
     openDialog($('#dlg-ai'));
-    checkNano().then(() => { paintNanoFields(); paintAIChip(); });
   }
-  function refreshAIForm() {
-    const provider = $('#form-ai').elements.provider.value;
-    $('#nano-fields').hidden = provider !== 'chrome';
-    $('#claude-fields').hidden = provider !== 'claude';
-    paintNanoFields();
-  }
-  function paintNanoFields() {
-    const el = $('#nano-status');
-    if (!el) return;
-    const st = S.nano.status, pctDone = Math.round(S.nano.progress * 100);
-    const texts = {
-      unknown: 'Checking your browser…',
-      unsupported: 'This browser doesn’t have the built-in AI. Open QuizNova in the latest Google Chrome on a computer, or choose Claude.',
-      unavailable: 'Chrome’s built-in AI can’t run on this computer (it needs plenty of free disk space and a fairly powerful PC). Choose Claude instead.',
-      downloadable: 'Not downloaded yet. Click the button — Chrome downloads the AI model once (a few GB), then it works even offline.',
-      downloading: `Downloading the AI model…${pctDone ? ` ${pctDone}%` : ''} You can close this and keep playing — AI turns on by itself when it’s done.`,
-      available: 'Ready on this PC ✓ — free AI questions are on.',
-    };
-    el.textContent = texts[st] || texts.unavailable;
-    el.dataset.tone = st === 'available' ? 'good' : st === 'unsupported' || st === 'unavailable' ? 'bad' : '';
-    $('#nano-download').hidden = st !== 'downloadable';
-    const bar = $('#nano-progress');
-    bar.hidden = st !== 'downloading';
-    bar.firstElementChild.style.width = `${pctDone}%`;
-    $('#form-ai input[name="provider"][value="chrome"]').closest('label').classList.toggle('off', st === 'unsupported' || st === 'unavailable');
-    paintAIChip();
+  const pickedModel = () => AI_MODELS[$('#form-ai').elements.model.value] ? $('#form-ai').elements.model.value : DEFAULT_MODEL;
+  function paintModelHint() {
+    $('#ai-model-hint').textContent = pickedModel() === DEFAULT_MODEL
+      ? `${AI_MODELS[DEFAULT_MODEL].label}: the most accurate, best for hard questions. The first question arrives in a few seconds.`
+      : `${AI_MODELS['gemini-3.5-flash-lite'].label}: the quickest. A little less precise on deep cuts.`;
   }
   function afterAIChange() {
     paintAIChip();
     updateTop();
     if (S.view === 'home') renderHome();
-  }
-  function paintAICost() {
-    const m = AI_MODELS[$('#ai-model').value] || AI_MODELS['claude-opus-5'];
-    $('#ai-cost').textContent = `${m.note}. Roughly ${m.cents}¢ per 10 questions, billed to your Anthropic account.`;
   }
   function aiStatus(msg, tone = '') {
     const el = $('#ai-status');
@@ -1690,34 +1674,41 @@ Latency-sensitive; begin your visible answer immediately.`;
     el.textContent = msg;
     el.dataset.tone = tone;
   }
+  // Catches a pasted key that can't be a Gemini key (including an Anthropic key from the old Claude option).
+  function keyProblem(key) {
+    if (!key) return 'Paste your Gemini API key first.';
+    if (/^sk-ant-/.test(key)) return 'That’s a Claude (Anthropic) key. QuizNova now uses Gemini: create a free key in Google AI Studio.';
+    if (key.length < 20 || /\s/.test(key)) return 'That doesn’t look like a Gemini API key. Copy the whole key from Google AI Studio.';
+    return '';
+  }
   function saveAISettings(e) {
     e.preventDefault();
-    const provider = $('#form-ai').elements.provider.value || 'chrome';
     const key = $('#ai-key').value.trim();
-    if (provider === 'claude') {
-      if (!key) { aiStatus('Paste your Anthropic API key — or choose the free AI on this PC.', 'bad'); $('#ai-key').focus(); return; }
-      if (!/^sk-ant-/.test(key)) { aiStatus('That doesn’t look like an Anthropic API key (they start with “sk-ant-”).', 'bad'); return; }
-    } else if (S.nano.status === 'downloadable') {
-      aiStatus('Click “Download & turn on free AI” first.', 'bad'); return;
-    } else if (S.nano.status === 'unsupported' || S.nano.status === 'unavailable') {
-      aiStatus('This computer can’t run the free AI — choose Claude instead.', 'bad'); return;
-    }
-    store.set(K.ai, { provider, key, model: $('#ai-model').value });
+    const problem = keyProblem(key);
+    if (problem) { aiStatus(problem, 'bad'); $('#ai-key').focus(); return; }
+    store.set(K.ai, { key, model: pickedModel() });
     $('#dlg-ai').close();
     afterAIChange();
-    if (aiReady()) toast(`AI questions on · ${aiLabel()}`, 'sparkle', 'good');
-    else toast('AI turns on as soon as the download finishes', 'sparkle');
+    toast(`AI questions on · ${aiLabel()}`, 'sparkle', 'good');
   }
+  // A one-word request checks the key, the model and that Gemini can be used from here.
   async function testAIKey(btn) {
-    const key = $('#ai-key').value.trim();
-    const model = $('#ai-model').value;
-    if (!key) { aiStatus('Paste your API key first.', 'bad'); return; }
+    const key = $('#ai-key').value.trim(), model = pickedModel();
+    const problem = keyProblem(key);
+    if (problem) { aiStatus(problem, 'bad'); return; }
     btn.disabled = true;
     aiStatus('Checking your key…');
     try {
-      const Anthropic = await loadSDK();
-      await aiClient(Anthropic, key).models.retrieve(model);
-      aiStatus(`Your key works — ${AI_MODELS[model].label} is ready. Press Save.`, 'good');
+      let res;
+      try {
+        res = await fetch(`${GEMINI_URL}/${model}:generateContent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+          body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Reply with the word OK.' }] }], generationConfig: { maxOutputTokens: 256 } }),
+        });
+      } catch { throw Object.assign(new Error('network'), { network: true }); }
+      if (!res.ok) throw await geminiError(res);
+      aiStatus(`Your key works: ${AI_MODELS[model].label} is ready. Press Save.`, 'good');
     } catch (err) {
       const info = aiErrorInfo(err);
       aiStatus(info ? info.msg : 'Couldn’t check the key.', 'bad');
@@ -1754,16 +1745,12 @@ Latency-sensitive; begin your visible answer immediately.`;
     if (!localOk) f.elements.source.value = 'ai';
     const src = f.elements.source.value;
     $('#solo-diff-field').hidden = src !== 'ai' && !gen;
-    const cfg = aiCfg();
     const hint = $('#solo-source-hint');
     if (gen && src === 'local') hint.textContent = 'QuizNova makes brand-new problems every game and works out every answer itself — always correct, no AI needed.';
-    else if (gen && aiReady()) hint.textContent = cfg.provider === 'chrome'
-      ? 'Chrome’s free AI writes brand-new maths problems, but it often gets maths answers wrong. Generated is always correct.'
-      : `${aiLabel()} writes brand-new maths problems. AI can occasionally get an answer wrong; Generated is always correct.`;
-    else if (src === 'ai' && !aiReady()) hint.innerHTML = `AI isn’t on yet — <button type="button" class="link-btn" data-action="ai-settings">turn on AI</button> (there’s a free option).`;
+    else if (gen && aiReady()) hint.textContent = `${aiLabel()} writes brand-new maths problems. AI can occasionally get an answer wrong; Generated is always correct.`;
+    else if (src === 'ai' && !aiReady()) hint.innerHTML = `AI isn’t on yet — <button type="button" class="link-btn" data-action="ai-settings">turn on AI</button> (it’s free with a Gemini key).`;
     else if (src === 'ai' && filmsFor(subj)) hint.textContent = `QuizNova picks new questions from its checked ${SUBJ[subj].name} film data, so every answer is right, and ${aiLabel()} words them.`;
-    else if (src === 'ai' && cfg.provider === 'claude') hint.textContent = `${AI_MODELS[cfg.model].label} writes brand-new questions · about ${AI_MODELS[cfg.model].cents}¢ per 10.`;
-    else if (src === 'ai') hint.textContent = 'Chrome’s free AI writes brand-new questions on this PC. It’s less accurate than Claude — QuizNova drops answers it contradicts itself on, and you can report any wrong ones on the results screen.';
+    else if (src === 'ai') hint.textContent = `${aiLabel()} writes brand-new questions, every one at the difficulty you pick. Report any wrong answer on the results screen.`;
     else hint.textContent = bankNote(subj);
   }
   function handleSoloSubmit(e) {
@@ -1771,12 +1758,12 @@ Latency-sensitive; begin your visible answer immediately.`;
     const f = e.currentTarget;
     const subject = $('#solo-subject').value;
     const topic = $('#solo-topic').value.trim().replace(/\s+/g, ' ');
-    const n = +f.elements.count.value || 10;
+    const n = COUNTS.includes(+f.elements.count.value) ? +f.elements.count.value : 20;
     const speed = SPEEDS[f.elements.speed.value] ? f.elements.speed.value : 'classic';
-    const difficulty = f.elements.difficulty.value || 'mixed';
+    const difficulty = DIFFS.includes(f.elements.difficulty.value) ? f.elements.difficulty.value : 'mixed';
     const source = f.elements.source.value === 'local' && hasLocal(subject) ? 'local' : 'ai';
     if (subject === 'custom' && topic.length < 2) { $('#solo-topic-err').textContent = 'Type a topic first.'; $('#solo-topic').focus(); return; }
-    if (source === 'ai' && !aiReady()) { openAISettings('Turn on AI to get brand-new questions — the free option works without a key.', ''); return; }
+    if (source === 'ai' && !aiReady()) { openAISettings('Turn on AI to get brand-new questions — it’s free with a Gemini key.', ''); return; }
     Object.assign(S.prefs, { subject: subject === 'custom' ? S.prefs.subject : subject, count: n, speed, difficulty });
     savePrefs();
     $('#dlg-solo').close();
@@ -1785,7 +1772,7 @@ Latency-sensitive; begin your visible answer immediately.`;
   function playTopic(topic) {
     const t = String(topic || '').trim().replace(/\s+/g, ' ');
     if (t.length < 2) { toast('Type a topic first', 'pen'); $('#home-topic')?.focus(); return; }
-    if (!aiReady()) { openAISettings('Turn on AI to play any topic — the free option works without a key.', ''); return; }
+    if (!aiReady()) { openAISettings('Turn on AI to play any topic — it’s free with a Gemini key.', ''); return; }
     startSolo({ subject: 'custom', topic: t.slice(0, 60), n: S.prefs.count, speed: S.prefs.speed, source: 'ai', difficulty: S.prefs.difficulty });
   }
   function surprise() {
@@ -1793,7 +1780,7 @@ Latency-sensitive; begin your visible answer immediately.`;
     const s = pick(pool);
     const speed = pick(Object.keys(SPEEDS));
     toast(`Surprise! ${s.name} · ${SPEEDS[speed].label} speed`, 'dice', 'good');
-    startSolo({ subject: s.id, n: S.prefs.count, speed, source: defaultSource(s.id), difficulty: 'mixed' });
+    startSolo({ subject: s.id, n: S.prefs.count, speed, source: defaultSource(s.id), difficulty: S.prefs.difficulty });
   }
 
   /* ================= Solo: engine ================= */
@@ -1806,7 +1793,7 @@ Latency-sensitive; begin your visible answer immediately.`;
     stopGame();
     const g = {
       kind: 'solo', subject, topic, speed, seed, challenge, difficulty, source,
-      n: preset ? preset.length : (opts.n || 10), questions: [],
+      n: preset ? preset.length : (opts.n || 20), questions: [],
       feed: { done: true, error: null, errorKey: false, abort: null, model: '' },
       i: -1, phase: 'intro', phaseEnds: now() + 3000, introShown: null,
       answers: [], score: 0, streak: 0, bestStreak: 0, startedAt: now(),
@@ -1998,7 +1985,7 @@ Latency-sensitive; begin your visible answer immediately.`;
     const ch = g.challenge;
     const hof = hallOfFame(g.subject, 5);
     const best = bestFor(S.user.id, g.subject);
-    const sourceText = g.source === 'ai' ? `AI · ${esc(g.feed.model)}` : g.source === 'code' ? 'Challenge code' : isGen(g.subject) ? 'Generated · auto-checked' : 'Built-in';
+    const sourceText = g.source === 'ai' ? `AI · <span data-feed-model>${esc(g.feed.model)}</span>` : g.source === 'code' ? 'Challenge code' : isGen(g.subject) ? 'Generated · auto-checked' : 'Built-in';
     $('#view-game').innerHTML = `
     <div class="page">
       <div class="game-grid">
@@ -2033,6 +2020,7 @@ Latency-sensitive; begin your visible answer immediately.`;
           </section>
         </aside>
         <section class="workspace" aria-label="Question">
+          <div class="hud" id="hud" aria-hidden="true"></div>
           <article class="q-card" id="q-card"></article>
           <div class="q-actions" id="q-actions"></div>
           <p class="kbd-hint">Keys: <kbd>1</kbd>–<kbd>4</kbd> or <kbd>A</kbd>–<kbd>D</kbd> to answer · <kbd>Enter</kbd> for the next question</p>
@@ -2119,6 +2107,8 @@ Latency-sensitive; begin your visible answer immediately.`;
     }
     $('#s-streak').innerHTML = `${icon('flame')}${g.streak >= 5 ? 'Unstoppable!' : g.streak >= 3 ? 'On fire!' : `${g.streak} streak`}`;
     $('#s-streak').classList.toggle('hot', g.streak >= 3);
+    paintHud([`Q <b>${Math.max(1, Math.min(g.i + 1, g.n))}</b>/${g.n}`, `<b>${fmtNum(g.score)}</b> pts`, `${icon('flame')}<b>${g.streak}</b>`,
+      ...(g.challenge ? [`${g.score >= g.challenge.sc ? 'Ahead of' : 'Chasing'} <b>${esc(g.challenge.by)}</b>`] : [])]);
     const justIdx = g.phase === 'feedback' ? g.answers.length - 1 : -1;
     $('#s-caps').innerHTML = Array.from({ length: g.n }, (_, k) => {
       const a = g.answers[k];
@@ -2340,6 +2330,13 @@ Latency-sensitive; begin your visible answer immediately.`;
   }
 
   /* ================= Battle: setup ================= */
+  // Difficulty and question-count pickers shared by the battle and online-room setups.
+  const diffSegHTML = (name, id) => `<fieldset class="field seg-field" id="${id}"><legend>Difficulty</legend><div class="seg">
+      ${DIFFS.map(d => `<label><input type="radio" name="${name}" value="${d}"><span>${d[0].toUpperCase() + d.slice(1)}</span></label>`).join('')}
+    </div></fieldset>`;
+  const countSegHTML = name => `<div class="seg">${COUNTS.map(v => `<label><input type="radio" name="${name}" value="${v}"><span>${v}</span></label>`).join('')}</div>`;
+  const mysteryRule = () => `<li><span class="ic-circle red">${icon('gift')}</span><span><b>Mystery boxes</b> drop at random. The fastest right answer wins a power-up: <b>50:50</b>, <b>+10 s</b> or <b>Skip</b> (pass a question for half points).</span></li>`;
+
   function renderBattleSetup() {
     if (!S.roster.length || idKey(S.roster[0].id) !== idKey(S.user.id)) S.roster = [{ id: S.user.id }];
     const subject = SUBJ[S.battleSubject] ? S.battleSubject : S.prefs.subject;
@@ -2349,7 +2346,7 @@ Latency-sensitive; begin your visible answer immediately.`;
         <div>
           <span class="eyebrow">Battle mode · same device</span>
           <h1>Fastest finger battle</h1>
-          <p class="muted">2–4 players share this keyboard. Everyone logs in with their own ID, reads the question, then races to buzz in.</p>
+          <p class="muted">2–4 players share this phone or keyboard. Everyone logs in with their own ID, reads the question, then races to buzz in.</p>
         </div>
         <button class="btn btn-red" type="button" data-nav="online">${icon('wifi')}Friends not here? Play online</button>
       </header>
@@ -2367,12 +2364,10 @@ Latency-sensitive; begin your visible answer immediately.`;
               </div>
               <p class="hint" id="b-source-hint"></p>
             </fieldset>
+            ${diffSegHTML('b-diff', 'b-diff-field')}
             <fieldset class="field seg-field">
               <legend>Rounds</legend>
-              <div class="seg">
-                <label><input type="radio" name="b-rounds" value="5"><span>5</span></label>
-                <label><input type="radio" name="b-rounds" value="8"><span>8</span></label>
-              </div>
+              ${countSegHTML('b-rounds')}
               <p class="hint">Battles use multiple-choice and true/false questions.</p>
             </fieldset>
           </div>
@@ -2385,9 +2380,9 @@ Latency-sensitive; begin your visible answer immediately.`;
           <h2><span class="step-num">3</span>How it works</h2>
           <ul class="rules stg">
             <li><span class="ic-circle">${icon('eye')}</span><span>Everyone reads the question for a moment. <b>Buzzing early is a false start</b> and locks you out of that question.</span></li>
-            <li><span class="ic-circle red">${icon('bolt')}</span><span>When it says <b>BUZZ!</b>, hit your key. The first buzzer answers with <kbd>1</kbd>–<kbd>4</kbd>.</span></li>
+            <li><span class="ic-circle red">${icon('bolt')}</span><span>When it says <b>BUZZ!</b>, hit your key or tap your player card. The first buzzer answers with <kbd>1</kbd>–<kbd>4</kbd> or a tap.</span></li>
             <li><span class="ic-circle ink">${icon('trophy')}</span><span><b>+100</b> plus a speed bonus for a correct answer, <b>−50</b> for a wrong one — then the others can buzz. Watch for <b>Double points</b> rounds!</span></li>
-            <li><span class="ic-circle">${icon('keyboard')}</span><span>On a touch screen, tap your player card to buzz.</span></li>
+            ${mysteryRule()}
           </ul>
         </section>
       </div>
@@ -2397,8 +2392,8 @@ Latency-sensitive; begin your visible answer immediately.`;
       </div>
     </div>`;
     $('#b-subject').value = subject;
-    const rounds = [5, 8].includes(S.prefs.rounds) ? S.prefs.rounds : 8;
-    $(`input[name="b-rounds"][value="${rounds}"]`).checked = true;
+    $(`input[name="b-rounds"][value="${S.prefs.rounds}"]`).checked = true;
+    $(`input[name="b-diff"][value="${S.prefs.difficulty}"]`).checked = true;
     $(`input[name="b-source"][value="${defaultSource(subject)}"]`).checked = true;
     refreshBattleForm();
     renderRoster();
@@ -2413,10 +2408,11 @@ Latency-sensitive; begin your visible answer immediately.`;
     localRadio.nextElementSibling.innerHTML = gen ? `${icon('calc')}Generated` : `${icon('book')}Built-in`;
     if (!hasLocal(subj)) aiRadio.checked = true;
     const src = $('input[name="b-source"]:checked').value;
+    $('#b-diff-field').hidden = src !== 'ai' && !gen;
     const hint = $('#b-source-hint');
     if (gen && src === 'local') hint.textContent = 'Endless maths problems — QuizNova works out every answer, no AI needed.';
     else if (gen && aiReady()) hint.textContent = `${aiLabel()} writes new maths problems — AI can get answers wrong; Generated is always correct.`;
-    else if (src === 'ai' && !aiReady()) hint.innerHTML = `AI isn’t on yet — <button type="button" class="link-btn" data-action="ai-settings">turn on AI</button> (there’s a free option).`;
+    else if (src === 'ai' && !aiReady()) hint.innerHTML = `AI isn’t on yet — <button type="button" class="link-btn" data-action="ai-settings">turn on AI</button> (it’s free with a Gemini key).`;
     else hint.textContent = src === 'ai' ? `Fresh questions every battle · ${aiLabel()}${filmsFor(subj) ? ', answers from checked film data' : ''}.` : bankNote(subj, true);
   }
 
@@ -2447,33 +2443,41 @@ Latency-sensitive; begin your visible answer immediately.`;
   /* ================= Battle: engine ================= */
   function startBattle(sameSettings = false) {
     if (S.roster.length < 2) return;
-    let subject, rounds, source, topic = '';
+    let subject, rounds, source, topic = '', difficulty;
     if (sameSettings && S.lastResult && S.lastResult.kind === 'battle') {
-      ({ subject, rounds, source, topic } = S.lastResult.setup);
+      ({ subject, rounds, source, topic, difficulty } = S.lastResult.setup);
     } else {
       subject = $('#b-subject').value;
       topic = ($('#b-topic').value || '').trim().replace(/\s+/g, ' ').slice(0, 60);
-      rounds = +($('input[name="b-rounds"]:checked')?.value || 8);
+      const r = +($('input[name="b-rounds"]:checked')?.value), d = $('input[name="b-diff"]:checked')?.value;
+      rounds = COUNTS.includes(r) ? r : 20;
+      difficulty = DIFFS.includes(d) ? d : 'mixed';
       source = $('input[name="b-source"]:checked')?.value === 'local' && hasLocal(subject) ? 'local' : 'ai';
       if (subject === 'custom' && topic.length < 2) { toast('Type a topic for the battle first', 'pen'); $('#b-topic').focus(); return; }
-      if (source === 'ai' && !aiReady()) { openAISettings('Turn on AI to battle with brand-new questions — the free option works without a key.', ''); return; }
+      if (source === 'ai' && !aiReady()) { openAISettings('Turn on AI to battle with brand-new questions — it’s free with a Gemini key.', ''); return; }
       S.battleSubject = subject;
-      S.prefs.rounds = rounds;
+      Object.assign(S.prefs, { rounds, difficulty });
       savePrefs();
     }
     stopGame();
     const seed = uid();
     const g = {
-      kind: 'battle', subject, topic, seed, source, n: rounds, questions: [],
-      setup: { subject, rounds, source, topic },
+      kind: 'battle', subject, topic, seed, source, difficulty, n: rounds, questions: [], boxAt: boxSlots(rounds, seed),
+      setup: { subject, rounds, source, topic, difficulty },
       feed: { done: true, error: null, errorKey: false, abort: null, model: '' },
       i: -1, phase: 'intro', phaseEnds: now() + BT.intro, introShown: null,
-      players: S.roster.map((r, k) => ({ id: r.id, key: BUZZ_KEYS[k], score: 0, correct: 0, wrong: 0, reactions: [] })),
-      locked: new Set(), falseStart: new Set(), wrongPicks: new Set(), buzzer: null, openLeft: BT.open, result: null,
+      players: S.roster.map((r, k) => ({ id: r.id, key: BUZZ_KEYS[k], score: 0, correct: 0, wrong: 0, skips: 0, reactions: [], items: noItems() })),
+      locked: new Set(), falseStart: new Set(), wrongPicks: new Set(), hidden: new Set(), buzzer: null, openLeft: BT.open, result: null,
+      answerTotal: BT.answer, boxWin: null,
     };
     S.game = g;
-    if (source === 'ai') startFeed(g, { subject, topic, n: rounds, difficulty: 'mixed', mcqOnly: true });
-    else { addQuestions(g, buildLocal(subject, rounds, seed, true)); g.n = g.questions.length; }
+    if (source === 'ai') startFeed(g, { subject, topic, n: rounds, difficulty, mcqOnly: true });
+    else {
+      const list = buildLocal(subject, rounds, seed, true, difficulty);
+      g.n = list.length;
+      g.boxAt = boxSlots(g.n, seed);
+      addQuestions(g, list);
+    }
     document.activeElement?.blur();
     renderBattle();
     showView('game');
@@ -2504,7 +2508,7 @@ Latency-sensitive; begin your visible answer immediately.`;
       return;
     }
     g.locked = new Set(); g.falseStart = new Set(); g.wrongPicks = new Set();
-    g.buzzer = null; g.openLeft = BT.open; g.result = null;
+    g.buzzer = null; g.openLeft = BT.open; g.result = null; g.boxWin = null;
     renderBattleQuestion(true);
     setPhase('reading', BT.read);
     if (g.questions[g.i].bonus) SFX.bonus();
@@ -2533,6 +2537,8 @@ Latency-sensitive; begin your visible answer immediately.`;
     g.openLeft = Math.max(0, g.phaseEnds - t);
     g.buzzer = k;
     g.react = t - g.openedAt;
+    // Power-ups belong to this turn: a 50:50 doesn't carry over to the next player who buzzes.
+    g.hidden = new Set(); g.timeUsed = false; g.answerTotal = BT.answer;
     SFX.buzz();
     setPhase('answering', BT.answer);
     const card = $(`#buzzers [data-buzz="${k}"]`);
@@ -2543,11 +2549,12 @@ Latency-sensitive; begin your visible answer immediately.`;
     const g = S.game;
     if (!g || g.kind !== 'battle' || g.phase !== 'answering') return;
     const k = g.buzzer, p = g.players[k], q = g.questions[g.i];
-    if (value != null && value >= q.options.length) return;
+    if (value != null && (value >= q.options.length || g.hidden.has(value))) return;
     if (value != null && value === q.answer) {
       const pts = Math.round((100 + Math.round(100 * Math.max(0, 1 - g.react / 8000))) * bonusMult(q));
       p.score += pts; p.correct++; p.reactions.push(g.react);
       g.result = { k, pts };
+      if (q.bonus === 'box') { g.boxWin = openBox(p); toast(boxText(g.boxWin), 'gift', 'good'); }
       SFX.correct();
       if (q.bonus) confetti(40);
       setPhase('reveal', BT.reveal);
@@ -2559,13 +2566,51 @@ Latency-sensitive; begin your visible answer immediately.`;
     g.buzzer = null;
     SFX.wrong();
     toast(value == null ? `${p.id} ran out of time (−50)` : `${p.id} answered wrong (−50)`, 'x');
+    reopenOrReveal();
+  }
+  // After a wrong answer or a skip, the others can buzz with whatever buzz time was left.
+  function reopenOrReveal() {
+    const g = S.game;
     if (g.openLeft > 250 && g.players.some((_, j) => !g.locked.has(j))) { g.openedAt = now(); setPhase('open', g.openLeft); }
     else battleReveal();
+  }
+
+  // The answering player uses a power-up won from a mystery box (one 50:50 and one +10 s per turn).
+  function battleUseItem(item) {
+    const g = S.game;
+    if (!g || g.kind !== 'battle' || g.phase !== 'answering' || !ITEMS[item]) return;
+    const k = g.buzzer, p = g.players[k], q = g.questions[g.i];
+    if (!p.items[item]) return;
+    if (item === 'fifty') {
+      const wrong = q.options.map((_, j) => j).filter(j => j !== q.answer && !g.wrongPicks.has(j));
+      if (q.tf || g.hidden.size || !wrong.length) return;
+      g.hidden = new Set(shuffle(wrong).slice(0, 2));
+    } else if (item === 'time') {
+      if (g.timeUsed) return;
+      g.timeUsed = true;
+      g.phaseEnds += 10000;
+      g.answerTotal += 10000;
+    } else {
+      const pts = skipPoints(q, false);
+      p.items.skip--;
+      p.score += pts; p.skips++;
+      g.locked.add(k);
+      g.buzzer = null;
+      SFX.power();
+      toast(`${p.id} skipped and banked +${pts}`, 'skip', 'good');
+      reopenOrReveal();
+      return;
+    }
+    p.items[item]--;
+    SFX.power();
+    paintBattle();
   }
 
   function battleReveal() {
     const g = S.game;
     g.buzzer = null;
+    const q = g.questions[g.i];
+    if (q && q.bonus === 'box' && !g.result) g.boxWin = { id: null };
     setPhase('reveal', BT.reveal);
   }
 
@@ -2590,7 +2635,7 @@ Latency-sensitive; begin your visible answer immediately.`;
         if (t >= g.phaseEnds) { g.openLeft = 0; battleReveal(); }
         break;
       case 'answering':
-        paintRing(g.phaseEnds - t, BT.answer, 'Answer time');
+        paintRing(g.phaseEnds - t, g.answerTotal || BT.answer, 'Answer time');
         if (t >= g.phaseEnds) battleAnswer(null);
         break;
       case 'reveal':
@@ -2628,7 +2673,7 @@ Latency-sensitive; begin your visible answer immediately.`;
               <div><dt>Category</dt><dd>${esc(CAT[s.category].name)}</dd></div>
               <div><dt>Round</dt><dd id="b-round">– / ${g.n}</dd></div>
               <div><dt>Players</dt><dd>${g.players.length}</dd></div>
-              <div><dt>Questions</dt><dd>${g.source === 'ai' ? `AI · ${esc(g.feed.model)}` : isGen(g.subject) ? 'Generated' : 'Built-in'}</dd></div>
+              <div><dt>Questions</dt><dd>${g.source === 'ai' ? `AI · <span data-feed-model>${esc(g.feed.model)}</span>` : isGen(g.subject) ? 'Generated' : 'Built-in'}</dd></div>
             </dl>
           </section>
           <section class="card">
@@ -2648,7 +2693,7 @@ Latency-sensitive; begin your visible answer immediately.`;
           <article class="q-card" id="q-card"></article>
           <div class="buzzers" id="buzzers"></div>
           <div class="q-actions" id="q-actions"></div>
-          <p class="kbd-hint">Buzzers: ${g.players.map(p => `<kbd>${p.key}</kbd> ${esc(p.id)}`).join(' · ')} — answer with <kbd>1</kbd>–<kbd>4</kbd></p>
+          <p class="kbd-hint">Buzzers: ${g.players.map(p => `<kbd>${p.key}</kbd> ${esc(p.id)}`).join(' · ')} — answer with <kbd>1</kbd>–<kbd>4</kbd> · power-ups <kbd>F</kbd> <kbd>T</kbd> <kbd>S</kbd></p>
         </section>
       </div>
     </div>`;
@@ -2661,7 +2706,7 @@ Latency-sensitive; begin your visible answer immediately.`;
     $('#q-card').innerHTML = `<div class="intro">
       <div class="intro-num pop" aria-live="assertive">${n}</div>
       <h2>${esc(subjName(g.subject, g.topic))} battle</h2>
-      <p>${g.n} rounds. Wait for <b>BUZZ!</b>, then hit your key: ${g.players.map(p => `<kbd>${p.key}</kbd> ${esc(p.id)}`).join(', ')}.</p>
+      <p>${g.n} rounds. Wait for <b>BUZZ!</b>, then hit your key or tap your card: ${g.players.map(p => `<kbd>${p.key}</kbd> ${esc(p.id)}`).join(', ')}.${g.boxAt.size ? ' Mystery boxes drop at random: answer them first to win a power-up.' : ''}</p>
       ${genLine(g)}
     </div>`;
   }
@@ -2683,6 +2728,7 @@ Latency-sensitive; begin your visible answer immediately.`;
         <h2 class="q-text" id="q-text">${esc(q.q)}</h2>
         ${questionMediaHTML(q)}
         <div id="b-options"></div>
+        <div id="b-items"></div>
       </div>`;
     card.classList.remove('swap');
     if (fresh) { void card.offsetWidth; card.classList.add('swap'); }
@@ -2703,6 +2749,7 @@ Latency-sensitive; begin your visible answer immediately.`;
       case 'reveal':
         if (g.result) { good = true; text = `${icon('check')}${esc(g.players[g.result.k].id)} got it! +${g.result.pts}`; }
         else text = `No one got it — the answer was ${'ABCD'[q.answer]}: ${esc(q.options[q.answer])}`;
+        if (g.boxWin) text += ` · ${icon('gift')}${esc(g.boxWin.id ? `won ${ITEMS[g.boxWin.item].label}` : 'the box stays shut')}`;
         break;
     }
     if (banner.dataset.phase !== g.phase) {
@@ -2716,17 +2763,22 @@ Latency-sensitive; begin your visible answer immediately.`;
     if (g.phase === 'waiting' && $('#q-card')) {
       $('#q-card').innerHTML = `<div class="intro"><div class="intro-num gen-orb" aria-hidden="true"><span class="waiting-dots"><i></i><i></i><i></i></span></div><h2>${esc(g.feed.model || 'AI')} is writing round ${g.i + 1}…</h2>${genLine(g)}</div>`;
     }
+    const answering = g.phase === 'answering';
     if (q && $('#b-options') && g.phase !== 'waiting') {
       $('#b-options').innerHTML = optionsHTML(q, {
-        locked: g.phase !== 'answering', picked: null, wrong: g.wrongPicks,
+        locked: !answering, picked: null, wrong: g.wrongPicks, hidden: answering ? g.hidden : null,
         reveal: g.phase === 'reveal', fresh: g.phase === 'reveal',
       });
+    }
+    if ($('#b-items')) {
+      const p = answering ? g.players[g.buzzer] : null;
+      $('#b-items').innerHTML = p ? itemBarHTML(p.items, { who: p.id, off: { fifty: q.tf || g.hidden.size > 0, time: g.timeUsed } }) : '';
     }
     $('#b-round').textContent = `${clamp(g.i + 1, 1, g.n)} / ${g.n}`;
 
     $('#buzzers').innerHTML = g.players.map((p, k) => {
       let cls = 'buzzer', state = 'Ready';
-      if (g.buzzer === k && g.phase === 'answering') { cls += ' buzzed'; state = 'Buzzed!'; }
+      if (g.buzzer === k && answering) { cls += ' buzzed'; state = 'Buzzed!'; }
       else if (g.phase === 'reveal' && g.result && g.result.k === k) { cls += ' winner'; state = `+${g.result.pts}`; }
       else if (g.falseStart.has(k)) { cls += ' locked'; state = 'False start'; }
       else if (g.locked.has(k)) { cls += ' locked'; state = 'Locked out'; }
@@ -2734,6 +2786,7 @@ Latency-sensitive; begin your visible answer immediately.`;
       return `<button class="${cls}" type="button" data-buzz="${k}" aria-label="Buzz for ${esc(p.id)} (key ${p.key})">
         <span class="keycap">${p.key}</span>${avatar(p.id, 'sm')}<b>${esc(p.id)}</b>
         <span class="b-score">${fmtNum(p.score)}</span><span class="b-state">${state}</span>
+        <span class="b-items">${itemChips(p.items)}</span>
       </button>`;
     }).join('');
 
@@ -2814,7 +2867,7 @@ Latency-sensitive; begin your visible answer immediately.`;
    * Messages from other players are untrusted: everything is validated, and all text is escaped.
    */
   const PEER_URL = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.5/+esm';
-  const NET_V = 1; // bump when the message format changes; everyone in a room needs the same version
+  const NET_V = 2; // bump when the message format changes; everyone in a room needs the same version (2: mystery boxes)
   const ROOM_MAX = 8;
   const ROOM_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const ROOM_RE = /^[A-HJ-KM-NP-Z2-9]{5}$/;
@@ -2856,19 +2909,26 @@ Latency-sensitive; begin your visible answer immediately.`;
   }
 
   const s60 = (v, n = 60) => (typeof v === 'string' ? v.slice(0, n) : '');
+  const cleanItems = o => Object.fromEntries(ITEM_KEYS.map(k => [k, clamp(Math.round(+(o && o[k]) || 0), 0, 9)]));
   const cleanPlayers = list => (Array.isArray(list) ? list : []).filter(p => p && ID_RE.test(String(p.id))).slice(0, ROOM_MAX).map(p => ({
     id: String(p.id), host: !!p.host, left: !!p.left,
     score: Math.round(+p.score || 0), correct: Math.max(0, Math.round(+p.correct || 0)), answered: Math.max(0, Math.round(+p.answered || 0)),
-    avgMs: p.avgMs != null && Number.isFinite(+p.avgMs) ? +p.avgMs : null,
+    avgMs: p.avgMs != null && Number.isFinite(+p.avgMs) ? +p.avgMs : null, items: cleanItems(p.items),
   }));
   const cleanResults = list => (Array.isArray(list) ? list : []).filter(r => r && ID_RE.test(String(r.id))).slice(0, ROOM_MAX).map(r => ({
     id: String(r.id), choice: Number.isInteger(r.choice) && r.choice >= 0 && r.choice < 4 ? r.choice : null,
-    correct: !!r.correct, pts: Math.max(0, Math.round(+r.pts || 0)), ms: Number.isFinite(+r.ms) ? +r.ms : null,
+    correct: !!r.correct, skip: !!r.skip, pts: Math.max(0, Math.round(+r.pts || 0)), ms: Number.isFinite(+r.ms) ? +r.ms : null,
   }));
+  const cleanBox = b => b && typeof b === 'object' ? (ID_RE.test(String(b.id)) && ITEM_KEYS.includes(b.item) ? { id: String(b.id), item: b.item } : { id: null }) : null;
   const rankPlayers = list => list.slice().sort((a, b) => b.score - a.score || b.correct - a.correct);
-  const publicPlayers = g => g.players.map(p => ({ id: p.id, host: p.host, left: p.left, score: p.score, correct: p.correct, answered: p.answered, avgMs: avg(p.times) }));
+  const publicPlayers = g => g.players.map(p => ({ id: p.id, host: p.host, left: p.left, score: p.score, correct: p.correct, answered: p.answered, avgMs: avg(p.times), items: { ...p.items } }));
   const sourceLabel = set => set.source === 'ai' ? `AI · ${aiLabel()}` : isGen(set.subject) ? 'Generated' : 'Built-in';
-  const publicSettings = () => ({ name: subjName(NET.settings.subject, NET.settings.topic), rounds: NET.settings.rounds, speed: NET.settings.speed, source: sourceLabel(NET.settings) });
+  const usesDiff = set => set.source === 'ai' || isGen(set.subject); // built-in questions have no difficulty levels
+  const diffName = d => d[0].toUpperCase() + d.slice(1);
+  const publicSettings = () => ({
+    name: subjName(NET.settings.subject, NET.settings.topic), rounds: NET.settings.rounds, speed: NET.settings.speed, source: sourceLabel(NET.settings),
+    diff: usesDiff(NET.settings) ? NET.settings.difficulty : '',
+  });
   // A question as sent to guests: no answer, accepted answers or explanation.
   const publicQ = q => { const o = encodeQ(q); delete o.a; delete o.e; delete o.x; delete o.at; delete o.y; delete o.nv; return o; };
   const decodePublicQ = o => { const q = decodeQ(o && typeof o === 'object' ? { ...o, a: 0 } : null); if (!q || q.type !== 'mcq') return null; q.answer = null; return q; };
@@ -2906,9 +2966,8 @@ Latency-sensitive; begin your visible answer immediately.`;
         <label><input type="radio" name="r-source" value="ai"><span>${icon('sparkle')}AI</span></label>
         <label><input type="radio" name="r-source" value="local"><span>${icon('book')}Built-in</span></label>
       </div><p class="hint" id="r-source-hint"></p></fieldset>
-      <fieldset class="field seg-field"><legend>Questions</legend><div class="seg">
-        ${[5, 8, 10].map(v => `<label><input type="radio" name="r-rounds" value="${v}"><span>${v}</span></label>`).join('')}
-      </div></fieldset>
+      ${diffSegHTML('r-diff', 'r-diff-field')}
+      <fieldset class="field seg-field"><legend>Questions</legend>${countSegHTML('r-rounds')}</fieldset>
       <fieldset class="field seg-field"><legend>Speed</legend><div class="seg">
         ${Object.entries(SPEEDS).map(([k, s]) => `<label><input type="radio" name="r-speed" value="${k}"><span>${s.label} <small>${s.secs} s</small></span></label>`).join('')}
       </div><p class="hint">Everyone gets the same time. Multiple-choice and true/false only.</p></fieldset>
@@ -2918,7 +2977,8 @@ Latency-sensitive; begin your visible answer immediately.`;
   function fillRoomForm(set) {
     $('#r-subject').value = SUBJ[set.subject] ? set.subject : S.prefs.subject;
     $('#r-topic').value = set.topic || '';
-    $(`input[name="r-rounds"][value="${[5, 8, 10].includes(set.rounds) ? set.rounds : 8}"]`).checked = true;
+    $(`input[name="r-rounds"][value="${COUNTS.includes(set.rounds) ? set.rounds : 20}"]`).checked = true;
+    $(`input[name="r-diff"][value="${DIFFS.includes(set.difficulty) ? set.difficulty : S.prefs.difficulty}"]`).checked = true;
     $(`input[name="r-speed"][value="${SPEEDS[set.speed] ? set.speed : 'classic'}"]`).checked = true;
     $(`input[name="r-source"][value="${set.source === 'local' && hasLocal($('#r-subject').value) ? 'local' : set.source === 'ai' ? 'ai' : defaultSource($('#r-subject').value)}"]`).checked = true;
     refreshRoomForm();
@@ -2933,16 +2993,19 @@ Latency-sensitive; begin your visible answer immediately.`;
     if (!hasLocal(subj)) aiRadio.checked = true;
     else if (!$('input[name="r-source"]:checked')) localRadio.checked = true;
     const src = $('input[name="r-source"]:checked').value, hint = $('#r-source-hint');
+    $('#r-diff-field').hidden = src !== 'ai' && !gen;
     if (src === 'ai' && !aiReady()) hint.innerHTML = `AI isn’t on yet — <button type="button" class="link-btn" data-action="ai-settings">turn on AI</button>. Only the host needs it.`;
     else if (src === 'ai') hint.textContent = `${aiLabel()} writes new questions on the host’s device — friends don’t need AI.`;
     else hint.textContent = gen ? 'Endless maths problems — QuizNova works out every answer.' : bankNote(subj, true);
   }
   function readRoomForm() {
     const subject = $('#r-subject').value;
+    const rounds = +($('input[name="r-rounds"]:checked')?.value), difficulty = $('input[name="r-diff"]:checked')?.value;
     return {
       subject, topic: ($('#r-topic').value || '').trim().replace(/\s+/g, ' ').slice(0, 60),
       source: $('input[name="r-source"]:checked')?.value === 'local' && hasLocal(subject) ? 'local' : 'ai',
-      rounds: +($('input[name="r-rounds"]:checked')?.value || 8), speed: $('input[name="r-speed"]:checked')?.value || 'classic',
+      rounds: COUNTS.includes(rounds) ? rounds : 20, speed: $('input[name="r-speed"]:checked')?.value || 'classic',
+      difficulty: DIFFS.includes(difficulty) ? difficulty : 'mixed',
     };
   }
   function roomSettingsOk(set) {
@@ -2983,12 +3046,13 @@ Latency-sensitive; begin your visible answer immediately.`;
           <ul class="rules online-rules stg">
             <li><span class="ic-circle">${icon('wifi')}</span><span>Everyone needs internet. Up to <b>${ROOM_MAX} players</b>, each logged in with their own ID.</span></li>
             <li><span class="ic-circle red">${icon('bolt')}</span><span>Answer with a tap or <kbd>1</kbd>–<kbd>4</kbd>. Right answers score <b>100</b> plus up to <b>100</b> for speed.</span></li>
+            ${mysteryRule()}
             <li><span class="ic-circle ink">${icon('crown')}</span><span>The host’s device runs the game — keep it open until the end.</span></li>
           </ul>
         </section>
       </div>
     </div>`;
-    fillRoomForm({ subject: S.prefs.subject, rounds: S.prefs.rounds, speed: S.prefs.speed });
+    fillRoomForm({ subject: S.prefs.subject, rounds: S.prefs.rounds, speed: S.prefs.speed, difficulty: S.prefs.difficulty });
   }
   function renderOnlineLobby() {
     const host = NET.role === 'host', players = NET.players, me = idKey(S.user.id);
@@ -3009,8 +3073,9 @@ Latency-sensitive; begin your visible answer immediately.`;
           ${host ? `<button class="btn btn-sm" type="button" data-action="copy-room">${icon('copy')}Copy invite</button>` : ''}
           <dl class="info-list room-info">
             <div><dt>Subject</dt><dd id="room-subject">${esc(set.name || '—')}</dd></div>
-            <div><dt>Questions</dt><dd>${esc(String(set.rounds || '—'))} · ${esc(set.source || '')}</dd></div>
-            <div><dt>Speed</dt><dd>${SPEEDS[set.speed] ? `${SPEEDS[set.speed].label} · ${SPEEDS[set.speed].secs} s` : '—'}</dd></div>
+            <div><dt>Questions</dt><dd id="room-rounds">${esc(String(set.rounds || '—'))} · ${esc(set.source || '')}</dd></div>
+            <div><dt>Difficulty</dt><dd id="room-diff">${set.diff ? esc(diffName(set.diff)) : '—'}</dd></div>
+            <div><dt>Speed</dt><dd id="room-speed">${SPEEDS[set.speed] ? `${SPEEDS[set.speed].label} · ${SPEEDS[set.speed].secs} s` : '—'}</dd></div>
           </dl>
         </section>
         <section class="card">
@@ -3047,7 +3112,7 @@ Latency-sensitive; begin your visible answer immediately.`;
       peer.on('connection', hostOnConnection);
       peer.on('error', netOnError);
       peer.on('disconnected', () => { if (NET.peer === peer && !peer.destroyed) peer.reconnect(); });
-      Object.assign(S.prefs, { rounds: set.rounds, speed: set.speed });
+      Object.assign(S.prefs, { rounds: set.rounds, speed: set.speed, difficulty: set.difficulty });
       if (set.subject !== 'custom') S.prefs.subject = set.subject;
       savePrefs();
       renderOnline();
@@ -3120,6 +3185,10 @@ Latency-sensitive; begin your visible answer immediately.`;
         return;
       }
       if (msg.t === 'ans') hostRecordAnswer(player.id, msg);
+      else if (msg.t === 'use') {
+        const res = hostUseItem(player.id, msg);
+        try { conn.send(res || { t: 'used', i: msg.i, item: ITEM_KEYS.includes(msg.item) ? msg.item : '', denied: true }); } catch { /* peer went away */ }
+      }
     });
     conn.on('close', () => { if (player) hostPlayerLeft(player); });
     conn.on('error', () => {});
@@ -3140,7 +3209,12 @@ Latency-sensitive; begin your visible answer immediately.`;
   }
 
   /* ---------- Game (both roles share the view; the host runs the rules) ---------- */
-  const newView = () => ({ q: null, limit: 0, shownAt: 0, deadline: 0, myChoice: null, done: new Set(), results: null, timeUp: false });
+  // Per-question state on each device. `extra` is time added by +10 s; `hidden` the options a 50:50 removed.
+  const newView = () => ({
+    q: null, limit: 0, shownAt: 0, deadline: 0, myChoice: null, done: new Set(), results: null, timeUp: false,
+    hidden: new Set(), extra: 0, skipped: false, skipPts: 0, pendingItem: null, usedItems: new Set(), box: null,
+  });
+  const myOnlinePlayer = g => g.players.find(p => idKey(p.id) === idKey(S.user.id)) || null;
 
   function hostStartGame() {
     if (NET.role !== 'host' || NET.status !== 'lobby') return;
@@ -3152,15 +3226,21 @@ Latency-sensitive; begin your visible answer immediately.`;
     const seed = uid();
     const g = {
       kind: 'online', role: 'host', subject: set.subject, topic: set.topic, source: set.source, speed: set.speed, seed,
-      n: set.rounds, questions: [], feed: { done: true, error: null, errorKey: false, abort: null, model: '' },
+      difficulty: set.difficulty, n: set.rounds, questions: [], boxAt: boxSlots(set.rounds, seed),
+      feed: { done: true, error: null, errorKey: false, abort: null, model: '' },
       i: -1, phase: 'intro', phaseEnds: now() + OT.intro, introShown: null, name: subjName(set.subject, set.topic),
-      players: NET.players.map(p => ({ id: p.id, host: p.host, left: false, score: 0, correct: 0, answered: 0, times: [] })),
-      got: new Map(), view: newView(),
+      players: NET.players.map(p => ({ id: p.id, host: p.host, left: false, score: 0, correct: 0, answered: 0, times: [], items: noItems() })),
+      got: new Map(), extra: new Map(), used: new Map(), view: newView(),
     };
     S.game = g;
     NET.status = 'playing';
-    if (set.source === 'ai') startFeed(g, { subject: set.subject, topic: set.topic, n: set.rounds, difficulty: 'mixed', mcqOnly: true });
-    else { addQuestions(g, buildLocal(set.subject, set.rounds, seed, true)); g.n = g.questions.length; }
+    if (set.source === 'ai') startFeed(g, { subject: set.subject, topic: set.topic, n: set.rounds, difficulty: set.difficulty, mcqOnly: true });
+    else {
+      const list = buildLocal(set.subject, set.rounds, seed, true, set.difficulty);
+      g.n = list.length;
+      g.boxAt = boxSlots(g.n, seed);
+      addQuestions(g, list);
+    }
     broadcast({ t: 'start', n: g.n, name: g.name, subject: g.subject, topic: g.topic, source: set.source, speed: g.speed, players: publicPlayers(g) });
     renderOnlineGame();
     showView('game');
@@ -3176,11 +3256,13 @@ Latency-sensitive; begin your visible answer immediately.`;
       if (g.role === 'host' && t >= g.phaseEnds) hostNext();
     } else if (g.phase === 'question') {
       const left = g.view.deadline - t;
-      paintTimer(Math.max(0, left), g.view.limit);
-      if (left <= 0 && !g.view.timeUp) { g.view.timeUp = true; if (g.view.myChoice == null) paintOnlineQuestion(false); }
+      paintTimer(Math.max(0, left), g.view.limit + g.view.extra);
+      if (left <= 0 && !g.view.timeUp) { g.view.timeUp = true; if (g.view.myChoice == null) paintOnlineQuestion(); }
       if (g.role === 'host') {
-        const everyone = g.players.filter(p => !p.left).every(p => g.view.done.has(idKey(p.id)));
-        if (everyone || t >= g.view.deadline + OT.grace) hostReveal();
+        const waiting = g.players.filter(p => !p.left && !g.view.done.has(idKey(p.id)));
+        // Players who used +10 s get their extra time before the answer is revealed.
+        const extra = Math.max(0, ...waiting.map(p => g.extra.get(idKey(p.id)) || 0));
+        if (!waiting.length || t >= g.qDeadline + extra + OT.grace) hostReveal();
       }
     } else if (g.phase === 'waiting' && g.role === 'host') {
       if (g.i < g.questions.length) hostShow();
@@ -3205,39 +3287,86 @@ Latency-sensitive; begin your visible answer immediately.`;
     const limit = Math.round(SPEEDS[g.speed].secs * 1000 * (q.tx || 1) * (q.bonus === 'lightning' ? 0.5 : 1));
     g.phase = 'question';
     g.got = new Map();
-    g.view = { ...newView(), q: decodePublicQ(publicQ(q)), limit, shownAt: now(), deadline: now() + limit };
+    g.extra = new Map();
+    g.used = new Map();
+    g.qDeadline = now() + limit;
+    g.view = { ...newView(), q: decodePublicQ(publicQ(q)), limit, shownAt: now(), deadline: g.qDeadline };
     broadcast({ t: 'q', i: g.i, n: g.n, q: publicQ(q), limit });
     renderOnlineQuestion();
     if (q.bonus) SFX.bonus();
+  }
+  function hostAnswered(key) {
+    const g = S.game;
+    g.view.done.add(key);
+    broadcast({ t: 'progress', i: g.i, done: g.players.filter(p => g.view.done.has(idKey(p.id))).map(p => p.id) });
+    paintOnlineBanner();
+    paintOnlineBoard();
   }
   function hostRecordAnswer(id, msg) {
     const g = S.game;
     if (!g || g.kind !== 'online' || g.role !== 'host' || g.phase !== 'question' || msg.i !== g.i) return;
     const key = idKey(id), q = g.questions[g.i];
     if (g.got.has(key) || !Number.isInteger(msg.choice) || msg.choice < 0 || msg.choice >= q.options.length) return;
-    g.got.set(key, { choice: msg.choice, ms: clamp(Math.round(+msg.ms || 0), 0, g.view.limit) });
-    g.view.done.add(key);
-    broadcast({ t: 'progress', i: g.i, done: g.players.filter(p => g.view.done.has(idKey(p.id))).map(p => p.id) });
-    paintOnlineBanner();
-    paintOnlineBoard();
+    g.got.set(key, { choice: msg.choice, ms: clamp(Math.round(+msg.ms || 0), 0, g.view.limit + (g.extra.get(key) || 0)) });
+    hostAnswered(key);
+  }
+  // A player uses a power-up won from a mystery box (one of each per question, before answering). The host checks
+  // it and replies with what it does; null means it isn't allowed.
+  function hostUseItem(id, msg) {
+    const g = S.game, item = msg && msg.item;
+    if (!g || g.kind !== 'online' || g.role !== 'host' || g.phase !== 'question' || msg.i !== g.i || !ITEM_KEYS.includes(item)) return null;
+    const key = idKey(id), p = g.players.find(x => idKey(x.id) === key), q = g.questions[g.i];
+    const used = g.used.get(key) || new Set();
+    if (!p || p.left || !(p.items[item] > 0) || g.got.has(key) || used.has(item)) return null;
+    if (now() > g.qDeadline + (g.extra.get(key) || 0) + OT.grace) return null; // their time is up
+    const res = { t: 'used', i: g.i, item };
+    if (item === 'fifty') {
+      if (q.tf) return null;
+      res.hide = shuffle(q.options.map((_, j) => j).filter(j => j !== q.answer)).slice(0, 2);
+    } else if (item === 'time') {
+      g.extra.set(key, (g.extra.get(key) || 0) + 10000);
+      res.add = 10000;
+    } else {
+      res.pts = skipPoints(q);
+      g.got.set(key, { skip: true });
+    }
+    p.items[item]--;
+    used.add(item);
+    g.used.set(key, used);
+    res.items = { ...p.items };
+    if (item === 'skip') hostAnswered(key);
+    return res;
   }
   function hostReveal() {
     const g = S.game, q = g.questions[g.i], res = [];
     for (const p of g.players) {
-      const a = g.got.get(idKey(p.id));
+      const key = idKey(p.id), a = g.got.get(key);
       if (!a) { if (!p.left) res.push({ id: p.id, choice: null, correct: false, pts: 0, ms: null }); continue; }
-      const correct = a.choice === q.answer;
-      const pts = correct ? Math.round((100 + Math.round(100 * (1 - a.ms / g.view.limit))) * (DIFF_MULT[q.difficulty] || 1) * bonusMult(q)) : 0;
+      if (a.skip) {
+        const pts = skipPoints(q);
+        p.score += pts;
+        res.push({ id: p.id, choice: null, correct: false, skip: true, pts, ms: null });
+        continue;
+      }
+      const correct = a.choice === q.answer, total = g.view.limit + (g.extra.get(key) || 0);
+      const pts = correct ? Math.round((100 + Math.round(100 * Math.max(0, 1 - a.ms / total))) * (DIFF_MULT[q.difficulty] || 1) * bonusMult(q)) : 0;
       p.answered++;
       if (correct) { p.correct++; p.times.push(a.ms); }
       p.score += pts;
       res.push({ id: p.id, choice: a.choice, correct, pts, ms: a.ms });
     }
+    // A mystery box goes to the fastest right answer.
+    let box = null;
+    if (q.bonus === 'box') {
+      const best = res.filter(r => r.correct).sort((x, y) => x.ms - y.ms)[0];
+      box = best ? openBox(g.players.find(p => p.id === best.id)) : { id: null };
+    }
     g.phase = 'reveal';
     g.phaseEnds = now() + OT.reveal;
     Object.assign(g.view.q, { answer: q.answer, explain: q.explain || '' });
     g.view.results = res;
-    broadcast({ t: 'reveal', i: g.i, answer: q.answer, explain: q.explain || '', res, scores: publicPlayers(g) });
+    g.view.box = box;
+    broadcast({ t: 'reveal', i: g.i, answer: q.answer, explain: q.explain || '', res, box, scores: publicPlayers(g) });
     paintOnlineReveal();
   }
   function hostEnd() {
@@ -3260,17 +3389,48 @@ Latency-sensitive; begin your visible answer immediately.`;
     showView('online');
   }
 
+  const onlineLocked = v => v.myChoice != null || v.skipped || v.timeUp;
   function onlineAnswer(choice) {
     const g = S.game;
-    if (!g || g.kind !== 'online' || g.phase !== 'question' || g.view.myChoice != null || g.view.timeUp) return;
+    if (!g || g.kind !== 'online' || g.phase !== 'question' || onlineLocked(g.view) || g.view.pendingItem === 'skip') return;
     const q = g.view.q;
-    if (!q || !Number.isInteger(choice) || choice < 0 || choice >= q.options.length) return;
+    if (!q || !Number.isInteger(choice) || choice < 0 || choice >= q.options.length || g.view.hidden.has(choice)) return;
     g.view.myChoice = choice;
     const ms = Math.round(now() - g.view.shownAt);
     if (g.role === 'host') hostRecordAnswer(S.user.id, { i: g.i, choice, ms });
     else if (NET.host && NET.host.open) NET.host.send({ t: 'ans', i: g.i, choice, ms });
     SFX.buzz();
-    paintOnlineQuestion(false);
+    paintOnlineQuestion();
+  }
+  // Uses one of your power-ups: the host applies its own straight away; a guest asks the host and waits for "used".
+  function onlineUseItem(item) {
+    const g = S.game;
+    if (!g || g.kind !== 'online' || g.phase !== 'question' || !ITEM_KEYS.includes(item)) return;
+    const v = g.view, me = myOnlinePlayer(g);
+    if (!me || !(me.items[item] > 0) || onlineLocked(v) || v.pendingItem || v.usedItems.has(item) || (item === 'fifty' && v.q.tf)) return;
+    v.usedItems.add(item);
+    if (g.role === 'host') { applyItem(g, hostUseItem(S.user.id, { i: g.i, item }) || { item, denied: true }); return; }
+    if (!NET.host || !NET.host.open) return;
+    v.pendingItem = item;
+    NET.host.send({ t: 'use', i: g.i, item });
+    paintOnlineQuestion();
+  }
+  function applyItem(g, res) {
+    const v = g.view, me = myOnlinePlayer(g);
+    v.pendingItem = null;
+    if (!res || res.denied) {
+      if (res && ITEM_KEYS.includes(res.item)) v.usedItems.delete(res.item);
+      toast('That power-up can’t be used right now.', 'x');
+      paintOnlineQuestion();
+      return;
+    }
+    if (me) me.items = cleanItems(res.items);
+    if (res.item === 'fifty') v.hidden = new Set((Array.isArray(res.hide) ? res.hide : []).filter(j => Number.isInteger(j) && j >= 0 && j < v.q.options.length));
+    else if (res.item === 'time') { const add = clamp(Math.round(+res.add || 0), 0, 10000); v.deadline += add; v.extra += add; v.timeUp = false; }
+    else if (res.item === 'skip') { v.skipped = true; v.skipPts = Math.max(0, Math.round(+res.pts || 0)); }
+    SFX.power();
+    paintOnlineQuestion();
+    paintOnlineBoard();
   }
 
   /* ---------- Guest: messages from the host ---------- */
@@ -3289,7 +3449,10 @@ Latency-sensitive; begin your visible answer immediately.`;
         NET.status = g && g.phase !== 'done' ? NET.status : 'lobby';
         NET.players = cleanPlayers(msg.players);
         const st = msg.settings || {};
-        NET.settings = { name: s60(st.name), rounds: clamp(Math.round(+st.rounds || 0), 0, 20), speed: SPEEDS[st.speed] ? st.speed : 'classic', source: s60(st.source, 40) };
+        NET.settings = {
+          name: s60(st.name), rounds: clamp(Math.round(+st.rounds || 0), 0, 20), speed: SPEEDS[st.speed] ? st.speed : 'classic', source: s60(st.source, 40),
+          diff: DIFFS.includes(st.diff) ? st.diff : '',
+        };
         if (first) { renderOnline(); showView('online'); toast(`You joined room ${NET.code}!`, 'wifi', 'good'); }
         else if (onlineViewVisible()) renderOnline();
         else updateTop();
@@ -3329,11 +3492,15 @@ Latency-sensitive; begin your visible answer immediately.`;
       case 'progress':
         if (g && msg.i === g.i && Array.isArray(msg.done)) { g.view.done = new Set(msg.done.map(idKey)); paintOnlineBanner(); paintOnlineBoard(); }
         break;
+      case 'used':
+        if (g && msg.i === g.i && g.phase === 'question') applyItem(g, msg);
+        break;
       case 'reveal':
         if (!g || msg.i !== g.i || !g.view.q) break;
         g.view.q.answer = Number.isInteger(msg.answer) && msg.answer >= 0 && msg.answer < g.view.q.options.length ? msg.answer : null;
         g.view.q.explain = s60(msg.explain, 240);
         g.view.results = cleanResults(msg.res);
+        g.view.box = cleanBox(msg.box);
         g.players = cleanPlayers(msg.scores);
         g.phase = 'reveal';
         paintOnlineReveal();
@@ -3390,10 +3557,11 @@ Latency-sensitive; begin your visible answer immediately.`;
           </section>
         </aside>
         <section class="workspace" aria-label="Question">
+          <div class="hud" id="hud" aria-hidden="true"></div>
           <div class="phase-banner" id="phase-banner" role="status"></div>
           <article class="q-card" id="q-card"></article>
           <div class="q-actions" id="q-actions"><button class="btn" type="button" data-action="quit">${icon('x')}Leave game</button></div>
-          <p class="kbd-hint">Answer with <kbd>1</kbd>–<kbd>4</kbd> or <kbd>A</kbd>–<kbd>D</kbd> · faster right answers score more</p>
+          <p class="kbd-hint">Answer with <kbd>1</kbd>–<kbd>4</kbd> or <kbd>A</kbd>–<kbd>D</kbd> · power-ups <kbd>F</kbd> <kbd>T</kbd> <kbd>S</kbd> · faster right answers score more</p>
         </section>
       </div>
     </div>`;
@@ -3405,7 +3573,7 @@ Latency-sensitive; begin your visible answer immediately.`;
     $('#q-card').innerHTML = `<div class="intro">
       <div class="intro-num pop" aria-live="assertive">${n}</div>
       <h2>${esc(g.name)} · online</h2>
-      <p>${g.n} questions · ${g.players.length} players. Everyone gets the same question at the same time — answer fast!</p>
+      <p>${g.n} questions · ${g.players.length} players. Everyone gets the same question at the same time — answer fast! Mystery boxes drop at random: the fastest right answer wins a power-up.</p>
     </div>`;
     paintOnlineBanner();
   }
@@ -3433,17 +3601,24 @@ Latency-sensitive; begin your visible answer immediately.`;
         <h2 class="q-text" id="q-text">${esc(q.q)}</h2>
         ${questionMediaHTML(q)}
         <div id="o-options"></div>
+        <div id="o-items"></div>
         <div id="o-after"></div>
       </div>`;
     replay(card, 'swap');
     $('#o-round').textContent = `${g.i + 1} / ${g.n}`;
-    paintOnlineQuestion(true);
+    paintOnlineQuestion();
+    paintOnlineBoard();
   }
-  function paintOnlineQuestion(fresh) {
+  function paintOnlineQuestion() {
     const g = S.game, v = g.view;
     if (!$('#o-options') || !v.q) return;
-    $('#o-options').innerHTML = optionsHTML(v.q, { locked: v.myChoice != null || v.timeUp, picked: v.myChoice, wrong: new Set(), hidden: new Set(), reveal: false, fresh: false });
-    if (!fresh && v.timeUp && v.myChoice == null) $('#o-after').innerHTML = `<p class="hint-line">${icon('clock')}Time’s up — waiting for the answer…</p>`;
+    const locked = onlineLocked(v) || v.pendingItem === 'skip', me = myOnlinePlayer(g), wait = !!v.pendingItem;
+    $('#o-options').innerHTML = optionsHTML(v.q, { locked, picked: v.myChoice, wrong: new Set(), hidden: v.hidden, reveal: false, fresh: false });
+    $('#o-items').innerHTML = me && !locked ? itemBarHTML(me.items, {
+      off: { fifty: wait || v.q.tf || v.hidden.size > 0 || v.usedItems.has('fifty'), time: wait || v.usedItems.has('time'), skip: wait },
+    }) : '';
+    $('#o-after').innerHTML = v.skipped ? `<p class="hint-line">${icon('skip')}Skipped — you get +${fmtNum(v.skipPts)} when the answer is revealed.</p>`
+      : v.timeUp && v.myChoice == null ? `<p class="hint-line">${icon('clock')}Time’s up — waiting for the answer…</p>` : '';
     paintOnlineBanner();
   }
   function paintOnlineReveal() {
@@ -3451,15 +3626,20 @@ Latency-sensitive; begin your visible answer immediately.`;
     if (!$('#o-options')) renderOnlineQuestion();
     const mine = (v.results || []).find(r => idKey(r.id) === me);
     $('#o-options').innerHTML = optionsHTML(q, { locked: true, picked: null, wrong: new Set(mine && mine.choice != null && !mine.correct ? [mine.choice] : []), hidden: new Set(), reveal: q.answer != null, fresh: true });
+    $('#o-items').innerHTML = '';
     const res = rankPlayers((v.results || []).map(r => ({ ...r, score: r.pts, correct: r.correct ? 1 : 0 })));
+    const got = r => r.correct || r.skip;
+    const iWonBox = !!(v.box && v.box.id && idKey(v.box.id) === me);
     $('#o-after').innerHTML = `
-      ${q.explain ? `<div class="fb ${mine && mine.correct ? 'fb-ok' : 'fb-bad'}"><span class="fb-ic">${icon(mine && mine.correct ? 'check' : 'x')}</span><p><span>${mine && mine.correct ? `${pick(QUIPS_OK)} +${mine.pts}` : mine && mine.choice != null ? pick(QUIPS_BAD) : 'No answer this time.'}</span><small>${esc(q.explain)}</small></p></div>` : ''}
+      ${v.box ? `<p class="box-line${v.box.id ? ' won' : ''}">${icon('gift')}${esc(iWonBox ? `You won ${ITEMS[v.box.item].label} from the mystery box! It ${ITEMS[v.box.item].text}.` : boxText(v.box))}</p>` : ''}
+      ${q.explain ? `<div class="fb ${mine && mine.correct ? 'fb-ok' : 'fb-bad'}"><span class="fb-ic">${icon(mine && mine.correct ? 'check' : mine && mine.skip ? 'skip' : 'x')}</span><p><span>${mine && mine.correct ? `${pick(QUIPS_OK)} +${mine.pts}` : mine && mine.skip ? `Skipped · +${mine.pts}` : mine && mine.choice != null ? pick(QUIPS_BAD) : 'No answer this time.'}</span><small>${esc(q.explain)}</small></p></div>` : ''}
       <ul class="o-res">${res.map(r => `<li class="${r.correct ? 'ok' : 'bad'}">${avatar(r.id, 'sm')}<b>${esc(r.id)}${idKey(r.id) === me ? ' (you)' : ''}</b>
-        <span>${r.choice == null ? 'No answer' : `${'ABCD'[r.choice]}${r.correct && r.ms != null ? ` · ${fmtSecs(r.ms)}` : ''}`}</span><span class="pts">${r.correct ? '+' + fmtNum(r.pts) : '0'}</span></li>`).join('')}</ul>`;
+        <span>${r.skip ? 'Skipped' : r.choice == null ? 'No answer' : `${'ABCD'[r.choice]}${r.correct && r.ms != null ? ` · ${fmtSecs(r.ms)}` : ''}`}</span><span class="pts">${got(r) ? '+' + fmtNum(r.pts) : '0'}</span></li>`).join('')}</ul>`;
     if (mine) {
       flashCard(mine.correct);
-      if (mine.correct) { SFX.correct(); flyPoints(mine.pts, $('#q-card .is-correct')); } else SFX.wrong();
+      if (mine.correct) { SFX.correct(); flyPoints(mine.pts, $('#q-card .is-correct')); } else if (!mine.skip) SFX.wrong();
     }
+    if (iWonBox) { SFX.bonus(); confetti(50); }
     paintOnlineBanner();
     paintOnlineBoard();
   }
@@ -3472,12 +3652,15 @@ Latency-sensitive; begin your visible answer immediately.`;
     if (g.phase === 'intro') text = `${icon('users')}Get ready — ${g.players.length} players`;
     else if (g.phase === 'waiting') text = `${icon('sparkle')}The host’s AI is writing the next question…`;
     else if (g.phase === 'question') {
-      if (g.view.myChoice == null && !g.view.timeUp) { phase = 'open'; text = `${icon('bolt')}Answer now! · ${done}/${active.length} answered`; }
-      else text = `${icon('clock')}${g.view.timeUp && g.view.myChoice == null ? 'Time’s up' : 'Locked in'} — waiting for the others (${done}/${active.length})`;
+      const v = g.view;
+      if (!onlineLocked(v)) { phase = 'open'; text = `${icon(v.q && v.q.bonus === 'box' ? 'gift' : 'bolt')}${v.q && v.q.bonus === 'box' ? 'Mystery box! Fastest right answer wins it' : 'Answer now!'} · ${done}/${active.length} answered`; }
+      else text = `${icon('clock')}${v.skipped ? 'Skipped' : v.timeUp && v.myChoice == null ? 'Time’s up' : 'Locked in'} — waiting for the others (${done}/${active.length})`;
     } else if (g.phase === 'reveal') {
       const right = (g.view.results || []).filter(r => r.correct).length;
-      good = !!(mine && mine.correct);
-      text = mine && mine.correct ? `${icon('check')}You got it! +${fmtNum(mine.pts)} · ${right}/${active.length} right` : `${icon('eye')}The answer was ${'ABCD'[g.view.q.answer] || '?'} · ${right}/${active.length} got it`;
+      good = !!(mine && (mine.correct || mine.skip));
+      text = mine && mine.correct ? `${icon('check')}You got it! +${fmtNum(mine.pts)} · ${right}/${active.length} right`
+        : mine && mine.skip ? `${icon('skip')}Skipped · +${fmtNum(mine.pts)} · the answer was ${'ABCD'[g.view.q.answer] || '?'}`
+        : `${icon('eye')}The answer was ${'ABCD'[g.view.q.answer] || '?'} · ${right}/${active.length} got it`;
     }
     if (banner.dataset.phase !== phase) replay(banner, 'swap');
     banner.dataset.phase = phase;
@@ -3488,11 +3671,17 @@ Latency-sensitive; begin your visible answer immediately.`;
   function paintOnlineBoard() {
     const g = S.game;
     if (!g || g.kind !== 'online' || !$('#scoreboard')) return;
-    const me = idKey(S.user.id);
-    flipRender($('#scoreboard'), rankPlayers(g.players).map((p, idx) => `<li class="sb-row${idx === 0 && p.score > 0 ? ' lead' : ''}${p.left ? ' left' : ''}" data-id="${esc(p.id)}">
+    const me = idKey(S.user.id), ranked = rankPlayers(g.players);
+    const gifts = p => ITEM_KEYS.reduce((n, k) => n + ((p.items && p.items[k]) || 0), 0);
+    flipRender($('#scoreboard'), ranked.map((p, idx) => `<li class="sb-row${idx === 0 && p.score > 0 ? ' lead' : ''}${p.left ? ' left' : ''}" data-id="${esc(p.id)}">
       <span class="rank${idx < 3 ? ' r' + (idx + 1) : ''}">${idx + 1}</span>${avatar(p.id, 'sm')}
-      <span class="nm">${esc(p.id)}${idKey(p.id) === me ? ' (you)' : ''}${p.left ? ' · left' : g.phase === 'question' && g.view.done.has(idKey(p.id)) ? ` <span class="o-done">${icon('check')}</span>` : ''}</span>
+      <span class="nm">${esc(p.id)}${idKey(p.id) === me ? ' (you)' : ''}${p.left ? ' · left' : g.phase === 'question' && g.view.done.has(idKey(p.id)) ? ` <span class="o-done">${icon('check')}</span>` : ''}${gifts(p) ? ` <span class="o-gift" title="${gifts(p)} power-up${gifts(p) === 1 ? '' : 's'}">${icon('gift')}${gifts(p)}</span>` : ''}</span>
       <span class="pts">${fmtNum(p.score)}</span></li>`).join(''));
+    const mine = ranked.findIndex(p => idKey(p.id) === me);
+    if (mine >= 0) {
+      paintHud([`Q <b>${clamp(g.i + 1, 1, g.n)}</b>/${g.n}`, `<b>${fmtNum(ranked[mine].score)}</b> pts`, `#<b>${mine + 1}</b> of ${ranked.length}`,
+        ...(gifts(ranked[mine]) ? [`${icon('gift')}<b>${gifts(ranked[mine])}</b>`] : [])]);
+    }
   }
 
   /* ---------- Results (saved on every player's device) ---------- */
@@ -3714,6 +3903,14 @@ Latency-sensitive; begin your visible answer immediately.`;
   }
 
   /* ================= Shared helpers ================= */
+  // Phones: the side panel sits below the question, so a slim bar above it shows the essentials.
+  function paintHud(parts) {
+    const hud = $('#hud');
+    if (!hud) return;
+    const html = parts.map(p => `<span>${p}</span>`).join('');
+    if (hud._html !== html) { hud._html = html; hud.innerHTML = html; }
+  }
+
   function flipRender(list, html) {
     if (!list) return;
     const before = new Map();
@@ -3889,14 +4086,13 @@ Latency-sensitive; begin your visible answer immediately.`;
       case 'ai-test': testAIKey(el); break;
       case 'ai-remove':
         $('#ai-key').value = '';
-        store.set(K.ai, { provider: 'chrome', key: '', model: $('#ai-model').value });
+        store.set(K.ai, { key: '', model: pickedModel() });
         aiStatus('Key removed from this browser.', '');
         afterAIChange();
         break;
       case 'ai-later':
         $('#dlg-ai').close();
         break;
-      case 'nano-download': downloadNano(el); break;
       case 'logout': logout(); break;
       case 'quit': quitGame(); break;
       case 'solo-next': soloNext(); break;
@@ -3934,7 +4130,7 @@ Latency-sensitive; begin your visible answer immediately.`;
 
   function bindEvents() {
     document.addEventListener('click', e => {
-      const el = e.target.closest('[data-action],[data-nav],[data-solo],[data-battle],[data-cat],[data-opt],[data-buzz],[data-power],[data-auth-mode],[data-pick-id],[data-remove],[data-lb-tab],[data-toggle-pass],[data-report],[data-close]');
+      const el = e.target.closest('[data-action],[data-nav],[data-solo],[data-battle],[data-cat],[data-opt],[data-buzz],[data-power],[data-item],[data-auth-mode],[data-pick-id],[data-remove],[data-lb-tab],[data-toggle-pass],[data-report],[data-close]');
       if (!el || el.disabled) return;
       const d = el.dataset;
       if (d.nav) { e.preventDefault(); navigate(d.nav); return; }
@@ -3949,6 +4145,11 @@ Latency-sensitive; begin your visible answer immediately.`;
       }
       if (d.buzz != null) { buzz(+d.buzz); return; }
       if (d.power) { usePower(d.power); return; }
+      if (d.item) {
+        const g = S.game;
+        if (g && g.kind === 'battle') battleUseItem(d.item); else if (g && g.kind === 'online') onlineUseItem(d.item);
+        return;
+      }
       if (d.authMode) { switchAuthMode(d.ctx, d.authMode); return; }
       if (d.pickId) { switchAuthMode(d.ctx, 'login', d.pickId); return; }
       if (d.remove != null) { S.roster.splice(+d.remove, 1); renderRoster(); return; }
@@ -3993,16 +4194,19 @@ Latency-sensitive; begin your visible answer immediately.`;
       } else if (id === 'b-subject' || name === 'b-source') {
         if (id === 'b-subject') $(`input[name="b-source"][value="${defaultSource(e.target.value)}"]`).checked = true;
         refreshBattleForm();
-      } else if (id === 'ai-model') paintAICost();
-      else if (name === 'provider' && e.target.form && e.target.form.id === 'form-ai') { aiStatus(''); refreshAIForm(); }
+      } else if (name === 'model' && e.target.form && e.target.form.id === 'form-ai') { aiStatus(''); paintModelHint(); }
       else if (e.target.closest && e.target.closest('#room-form')) {
         if (id === 'r-subject') $(`input[name="r-source"][value="${defaultSource(e.target.value)}"]`).checked = true;
         refreshRoomForm();
         if (NET.role === 'host' && NET.status === 'lobby') {
           NET.settings = readRoomForm();
           broadcastLobby();
-          const sub = $('#room-subject');
-          if (sub) sub.textContent = subjName(NET.settings.subject, NET.settings.topic);
+          // The room card shows the live settings.
+          const set = publicSettings(), put = (sel, text) => { const el = $(sel); if (el) el.textContent = text; };
+          put('#room-subject', set.name);
+          put('#room-rounds', `${set.rounds} · ${set.source}`);
+          put('#room-diff', set.diff ? diffName(set.diff) : '—');
+          put('#room-speed', `${SPEEDS[set.speed].label} · ${SPEEDS[set.speed].secs} s`);
         }
       }
     });
@@ -4047,12 +4251,16 @@ Latency-sensitive; begin your visible answer immediately.`;
         if (g.phase === 'question' && choice >= 0 && q && q.type === 'mcq' && choice < q.options.length && !g.hidden.has(choice)) { e.preventDefault(); soloAnswer(choice); }
         else if (g.phase === 'feedback' && (key === 'Enter' || key === 'ArrowRight' || key === ' ') && !(tag === 'BUTTON' && key !== 'ArrowRight')) { e.preventDefault(); soloNext(); }
       } else if (g.kind === 'online') {
-        if (g.phase === 'question' && choice >= 0 && !e.repeat) { e.preventDefault(); onlineAnswer(choice); }
+        if (g.phase !== 'question' || e.repeat) return;
+        if (choice >= 0) { e.preventDefault(); onlineAnswer(choice); }
+        else if (ITEM_BY_KEY[key]) { e.preventDefault(); onlineUseItem(ITEM_BY_KEY[key]); }
       } else {
         if (e.repeat) return;
         const b = BUZZ_KEYS.indexOf(key);
         if (b >= 0 && b < g.players.length) { e.preventDefault(); buzz(b); return; }
-        if (g.phase === 'answering' && choice >= 0) { e.preventDefault(); battleAnswer(choice); }
+        if (g.phase !== 'answering') return;
+        if (choice >= 0) { e.preventDefault(); battleAnswer(choice); }
+        else if (ITEM_BY_KEY[key]) { e.preventDefault(); battleUseItem(ITEM_BY_KEY[key]); }
       }
     });
   }
@@ -4061,7 +4269,8 @@ Latency-sensitive; begin your visible answer immediately.`;
   function init() {
     $$('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
     $('#solo-subject').innerHTML = subjectOptions();
-    $('#ai-model').innerHTML = Object.entries(AI_MODELS).map(([id, m]) => `<option value="${id}">${esc(m.label)} — ${esc(m.note)}</option>`).join('');
+    $('#ai-models').innerHTML = Object.entries(AI_MODELS).map(([id, m]) =>
+      `<label><input type="radio" name="model" value="${id}"><span>${esc(m.note)} <small>${esc(m.short)}</small></span></label>`).join('');
     paintTheme();
     paintSound();
     paintAIChip();
@@ -4070,9 +4279,8 @@ Latency-sensitive; begin your visible answer immediately.`;
     const current = store.get(K.current);
     S.user = current ? account(current) : null;
     paintUser();
-    if (S.user) { renderHome(); showView('home'); }
+    if (S.user) { renderHome(); showView('home'); maybePromptAI(); }
     else { renderAuth(); showView('auth'); }
-    checkNano().then(() => { if (S.user) { afterAIChange(); maybePromptAI(); } });
   }
 
   init();

@@ -1,0 +1,13 @@
+{
+  "name": "QuizNova — AI Quiz Battles",
+  "short_name": "QuizNova",
+  "description": "Quiz battles with AI questions, on your phone or your PC.",
+  "start_url": "../index.html",
+  "scope": "../",
+  "display": "standalone",
+  "background_color": "#E6E9E6",
+  "theme_color": "#17191A",
+  "icons": [
+    { "src": "quiznova-mark.webp", "sizes": "256x256", "type": "image/webp", "purpose": "any" }
+  ]
+}

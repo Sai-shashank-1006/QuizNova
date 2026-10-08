@@ -2,21 +2,36 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>QuizNova — Offline Quiz Battles</title>
-  <meta name="description" content="QuizNova is an offline quiz game: solo fastest-finger runs, same-device battles and shareable challenge codes across education, comics, movies, series, anime, gaming and sports — with AI-written questions.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>QuizNova — AI Quiz Battles</title>
+  <meta name="description" content="QuizNova is a quiz game for phones and PCs: solo fastest-finger runs, battles with friends, online rooms and shareable challenge codes across education, comics, movies, series, anime, gaming and sports — with AI-written questions.">
   <meta name="theme-color" content="#17191A">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="QuizNova">
   <link rel="icon" type="image/png" href="assets/favicon.png">
   <link rel="preload" as="image" href="assets/quiznova-logo.webp">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Fonts load without blocking the first paint (system fonts show until they arrive). -->
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
   <link rel="stylesheet" href="css/style.css">
   <script>
     // Apply the saved theme before first paint to avoid a flash.
     try { const t = localStorage.getItem('qn.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
     // The logo gloss masks with the logo image, which Chrome blocks when the page is opened straight from disk (file://).
-    if (location.protocol !== 'file:') document.documentElement.classList.add('can-gloss');
+    // The web app manifest (add to home screen) can't load from disk either.
+    if (location.protocol !== 'file:') {
+      document.documentElement.classList.add('can-gloss');
+      const m = document.createElement('link');
+      m.rel = 'manifest'; m.href = 'assets/manifest.webmanifest';
+      document.head.appendChild(m);
+    }
+    // Slow devices (few cores, little memory, data saver on) get a lighter version: fewer looping animations, no blur.
+    try {
+      const n = navigator, cores = n.hardwareConcurrency || 8, mem = n.deviceMemory || 8;
+      if (cores <= 2 || mem <= 2 || (cores <= 4 && mem <= 4) || (n.connection && n.connection.saveData)) document.documentElement.classList.add('lite');
+    } catch (e) {}
   </script>
 </head>
 <body class="logged-out">
@@ -113,7 +128,8 @@
           <legend>Questions</legend>
           <div class="seg">
             <label><input type="radio" name="count" value="5"><span>5</span></label>
-            <label><input type="radio" name="count" value="10" checked><span>10</span></label>
+            <label><input type="radio" name="count" value="10"><span>10</span></label>
+            <label><input type="radio" name="count" value="20" checked><span>20</span></label>
           </div>
         </fieldset>
         <fieldset class="field seg-field">
@@ -139,56 +155,34 @@
         <span class="ic-circle red" data-icon="sparkle"></span>
         <div>
           <h2 id="ai-title">Turn on AI questions</h2>
-          <p class="muted">With AI on, every game gets brand-new questions — on any subject or any topic you type. Without it, you play each subject’s small set of built-in questions, which repeat.</p>
+          <p class="muted">Google’s Gemini writes brand-new questions every game, on any subject or any topic you type, at exactly the difficulty you pick. It’s free: you only need a Gemini API key from your Google account. Without AI, you play each subject’s small set of built-in questions, which repeat.</p>
         </div>
         <button type="button" class="icon-btn sm" data-close aria-label="Close"><span data-icon="x"></span></button>
       </header>
       <div class="form-stack">
-        <fieldset class="provider-grid">
-          <legend class="sr-only">Where questions come from</legend>
-          <label class="provider-card">
-            <input type="radio" name="provider" value="chrome">
-            <span class="pc-body">
-              <span class="pc-top"><span class="ic-circle" data-icon="cpu"></span><b>Free AI on this PC</b><span class="badge green">Free</span></span>
-              <small>Chrome’s built-in AI (Gemini Nano). No key, no cost, no account. One-time download of a few GB. Less accurate than Claude.</small>
-            </span>
-          </label>
-          <label class="provider-card">
-            <input type="radio" name="provider" value="claude">
-            <span class="pc-body">
-              <span class="pc-top"><span class="ic-circle red" data-icon="sparkle"></span><b>Claude</b><span class="badge red">Best</span></span>
-              <small>Anthropic’s Claude writes the most accurate, hardest questions. Needs your own API key · about 1–4¢ per game.</small>
-            </span>
-          </label>
+        <ol class="ai-steps">
+          <li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio → API keys</a> and sign in with your Google account.</li>
+          <li>Press <b>Create API key</b>, then copy the key.</li>
+          <li>Paste it below, press <b>Test key</b>, then <b>Save</b>.</li>
+        </ol>
+        <div class="field">
+          <label for="ai-key">Gemini API key</label>
+          <div class="input-group">
+            <input class="input mono" id="ai-key" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="Paste your key">
+            <button type="button" class="icon-btn sm" data-toggle-pass="ai-key" aria-label="Show key"><span data-icon="eye"></span></button>
+          </div>
+          <p class="hint">It’s saved only in this browser and sent only to Google.</p>
+        </div>
+        <fieldset class="field seg-field">
+          <legend>Model</legend>
+          <div class="seg" id="ai-models"></div>
+          <p class="hint" id="ai-model-hint"></p>
         </fieldset>
-
-        <div id="nano-fields" class="provider-fields">
-          <p class="nano-status" id="nano-status">Checking your browser…</p>
-          <div class="progress" id="nano-progress" hidden><span></span></div>
-          <button type="button" class="btn btn-ink" id="nano-download" data-action="nano-download" hidden><span data-icon="play"></span>Download &amp; turn on free AI</button>
+        <div class="ai-actions">
+          <button type="button" class="btn btn-sm" data-action="ai-test"><span data-icon="check"></span>Test key</button>
+          <button type="button" class="btn btn-sm" data-action="ai-remove">Remove key</button>
         </div>
-
-        <div id="claude-fields" class="provider-fields">
-          <div class="field">
-            <label for="ai-key">Anthropic API key</label>
-            <div class="input-group">
-              <input class="input mono" id="ai-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
-              <button type="button" class="icon-btn sm" data-toggle-pass="ai-key" aria-label="Show key"><span data-icon="eye"></span></button>
-            </div>
-            <p class="hint">Create one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com → API Keys</a>. It is saved only in this browser and sent only to Anthropic.</p>
-          </div>
-          <div class="field">
-            <label for="ai-model">Model</label>
-            <select class="select input" id="ai-model"></select>
-            <p class="hint" id="ai-cost"></p>
-          </div>
-          <div class="claude-actions">
-            <button type="button" class="btn btn-sm" data-action="ai-test"><span data-icon="check"></span>Test key</button>
-            <button type="button" class="btn btn-sm" data-action="ai-remove">Remove key</button>
-          </div>
-          <p class="note"><span data-icon="lock"></span>Don’t save your key on a shared or public computer — anyone using this browser could use it.</p>
-        </div>
-
+        <p class="note"><span data-icon="lock"></span>Don’t save your key on a shared or public computer — anyone using this browser could use it.</p>
         <p class="ai-status" id="ai-status" role="status" hidden></p>
       </div>
       <footer class="modal-foot wrap">
@@ -266,7 +260,7 @@
         <span class="ic-circle ink" data-icon="help"></span>
         <div>
           <h2 id="help-title">How to play</h2>
-          <p class="muted">Everything runs offline — scores are saved on this device.</p>
+          <p class="muted">Works on phones and PCs — scores are saved on this device.</p>
         </div>
         <button type="button" class="icon-btn sm" data-close aria-label="Close"><span data-icon="x"></span></button>
       </header>
@@ -274,8 +268,8 @@
         <section>
           <h3><span data-icon="sparkle"></span>AI questions</h3>
           <ul>
-            <li>Turn on AI in <b>AI settings</b> and every game gets brand-new questions — they’re hard by default and never repeat ones you’ve had recently.</li>
-            <li><b>Free:</b> Chrome’s built-in AI runs on your PC (one-time download, no key). <b>Best:</b> Claude, with your own Anthropic API key.</li>
+            <li>Turn on AI in <b>AI settings</b> and every game gets brand-new questions from Google’s <b>Gemini</b>, free with your own key from Google AI Studio. They never repeat ones you’ve had recently.</li>
+            <li>Pick <b>Easy</b>, <b>Medium</b> or <b>Hard</b> and every question in the game is at that level: QuizNova throws away any the AI rates differently. <b>Mixed</b> gives a spread.</li>
             <li>Type <b>any topic</b> on the home screen — a series, a game, a player — and get a quiz about it.</li>
             <li>With AI off, you play each subject’s small set of built-in questions, which repeat — ones you haven’t had come first.</li>
             <li>AI can still get a fact wrong. On the results screen, press <b>Wrong answer? Report it</b> — the question stops counting against you and won’t come back.</li>
@@ -285,7 +279,7 @@
         <section>
           <h3><span data-icon="bolt"></span>Solo · fastest finger</h3>
           <ul>
-            <li>Each question has its own timer. Answer before it runs out.</li>
+            <li>Games have <b>20 questions</b> (or pick 5 or 10). Each question has its own timer. Answer before it runs out.</li>
             <li>Correct answers score <b>100</b> plus up to <b>100</b> for speed. Hard AI questions are worth ×1.5, medium ×1.2.</li>
             <li>Chain correct answers for a streak bonus of up to <b>+100</b>.</li>
             <li>One of each power-up per game: <b>50:50</b> (removes two wrong answers, or gives a hint), <b>+10 s</b> and <b>Skip</b> (keeps your streak).</li>
@@ -296,10 +290,9 @@
         <section>
           <h3><span data-icon="swords"></span>Battle · 2–4 players, one device</h3>
           <ul>
-            <li>Every player logs in with their own ID and gets a buzzer key: <kbd>Q</kbd> <kbd>P</kbd> <kbd>Z</kbd> <kbd>M</kbd>.</li>
+            <li>Every player logs in with their own ID and gets a buzzer key: <kbd>Q</kbd> <kbd>P</kbd> <kbd>Z</kbd> <kbd>M</kbd>. On a phone or tablet, tap your player card instead.</li>
             <li>Read the question, then buzz when it says <b>BUZZ!</b> Buzzing early is a false start.</li>
-            <li>The first buzzer answers with <kbd>1</kbd>–<kbd>4</kbd>: <b>+100</b> plus a speed bonus, or <b>−50</b> if wrong.</li>
-            <li>On touch screens, tap your player card to buzz.</li>
+            <li>The first buzzer answers with <kbd>1</kbd>–<kbd>4</kbd> or a tap: <b>+100</b> plus a speed bonus, or <b>−50</b> if wrong.</li>
           </ul>
         </section>
         <section>
@@ -308,6 +301,14 @@
             <li>Press <b>Online</b>, create a room and send your friends the 5-letter code. They press <b>Online → Join</b>.</li>
             <li>Everyone answers the same question at the same time, on their own phone or PC. Right answers score <b>100</b> plus up to <b>100</b> for speed.</li>
             <li>The host’s device runs the game (and its AI, if you pick AI) — keep it open until the end. Up to 8 players.</li>
+          </ul>
+        </section>
+        <section>
+          <h3><span data-icon="gift"></span>Mystery boxes · battles and online rooms</h3>
+          <ul>
+            <li>A mystery box drops on a few random questions. The <b>fastest right answer</b> wins it.</li>
+            <li>Inside is one power-up: <b>50:50</b> (removes two wrong answers), <b>+10 s</b> (more time to answer) or <b>Skip</b> (pass a question and still get half points).</li>
+            <li>Use a power-up on any later question: tap it, or press <kbd>F</kbd>, <kbd>T</kbd> or <kbd>S</kbd>. In a battle, use it after you buzz in.</li>
           </ul>
         </section>
         <section>
