@@ -17,7 +17,7 @@ pipeline {
     stage('Validate') {
       steps {
         script {
-          def required = ['index.html', 'css/style.css', 'js/data.js', 'js/maths.js', 'js/app.js', 'assets/quiznova-logo.webp', 'assets/quiznova-mark.webp', 'assets/favicon.png']
+          def required = ['index.html', 'css/style.css', 'js/config.js', 'js/data.js', 'js/maths.js', 'js/app.js', 'assets/quiznova-logo.webp', 'assets/quiznova-mark.webp', 'assets/favicon.png']
           required.each { f ->
             if (!fileExists(f)) {
               error "Missing required file: ${f}"
@@ -29,6 +29,7 @@ pipeline {
           if (isUnix()) {
             sh '''
               if command -v node >/dev/null 2>&1; then
+                node --check js/config.js
                 node --check js/data.js
                 node --check js/maths.js
                 node --check js/app.js
@@ -45,6 +46,7 @@ pipeline {
                 echo Node.js not found on this agent - skipping JavaScript syntax check.
                 exit /b 0
               )
+              node --check js/config.js || exit /b 1
               node --check js/data.js || exit /b 1
               node --check js/maths.js || exit /b 1
               node --check js/app.js || exit /b 1

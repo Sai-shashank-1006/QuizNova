@@ -19,12 +19,21 @@ QuizNova is a quiz game built with **HTML5, CSS3 and JavaScript**. It runs in an
 
 > **Why do questions repeat?** With AI off, you play each subject's small set of built-in questions (10 to 45), so they come back once you've had them all. Turn on AI and every game gets new ones. QuizNova offers to turn it on the first time you log in.
 
-### Turn it on (free)
+### Shared AI: no key for players
+The owner can turn on AI for everyone, so players never paste a key. QuizNova then sends AI requests through **[Firebase AI Logic](https://firebase.google.com/docs/ai-logic)** on the owner's Firebase project (Gemini Developer API, free Spark plan, no billing). The Gemini key stays inside Firebase and never ships in the app, and **App Check** (reCAPTCHA) makes sure requests come from this website. All players share the project's free daily limit; when it's used up, QuizNova says so and players can add their own key to keep going.
+
+To set it up, fill in `js/config.js` with:
+- `firebase`: the web app config from **Firebase console → Project settings → Your apps → Web app**.
+- `appCheck.siteKey`: the reCAPTCHA site key registered in **Firebase console → Security → App Check** (`provider`: `recaptcha-v3`, or `recaptcha-enterprise` for an Enterprise key).
+
+These values are public by design: they identify the project; they aren't passwords. Never put a Gemini API key or the reCAPTCHA **secret** key in the file. With `firebase: null`, each player adds their own key instead.
+
+### Your own key (optional with shared AI)
 1. Open [Google AI Studio → API keys](https://aistudio.google.com/apikey) and sign in with a Google account.
 2. Press **Create API key** and copy it.
 3. In QuizNova, open **AI settings** (the ✨ button), paste the key, press **Test key**, then press **Save**.
 
-The key is saved **only in your browser**, and it's sent only to Google. It's never part of the repo or the zip. **Every player uses their own key.** Don't save a key on a shared or public computer.
+A player's own key is used first, so they get their own free limit. The key is saved **only in their browser**, and it's sent only to Google. It's never part of the repo or the zip. Don't save a key on a shared or public computer.
 
 Gemini's free tier has usage limits (requests per minute and per day). A game uses one request, so this is plenty for normal play. Google may use free-tier requests to improve its products; the requests only contain quiz topics and recent questions.
 
@@ -225,6 +234,7 @@ Quiz Application/
 ├── css/
 │   └── style.css   # Neumorphic theme (light/dark), layouts for PCs, tablets and phones, motion & micro-interactions
 ├── js/
+│   ├── config.js   # Owner settings: the shared AI (Firebase project and App Check key)
 │   ├── data.js     # Categories, subjects (with AI topics) and the 231 built-in questions
 │   ├── maths.js    # Maths problem generator: arithmetic → calculus, answers worked out by QuizNova
 │   └── app.js      # Accounts, AI question streaming (Gemini), solo, battle and online engines, mystery boxes, challenge codes, stats, motion helpers
@@ -233,7 +243,8 @@ Quiz Application/
 ```
 
 ### How the AI call works (`js/app.js` → `aiGenerate`)
-- **No library:** it calls the [Gemini API](https://ai.google.dev/gemini-api/docs) straight from the browser with `fetch` (`streamGenerateContent?alt=sse`), sending the player's own key in the `x-goog-api-key` header. Nothing extra is downloaded.
+- **Own key:** it calls the [Gemini API](https://ai.google.dev/gemini-api/docs) straight from the browser with `fetch` (`streamGenerateContent?alt=sse`), sending the player's key in the `x-goog-api-key` header. Nothing extra is downloaded.
+- **Shared AI:** it loads the Firebase JS SDK (`firebase-app`, `firebase-app-check`, `firebase-ai`, version 13.0.0, about 195 KB) from Google's CDN on the first AI game, sets up App Check with reCAPTCHA, and streams with `generateContentStream` through Firebase AI Logic. The same JSON schema, prompts and thinking levels are used.
 - **Structured output:** it asks for JSON (`responseMimeType` with a `responseJsonSchema`), so every response has the same shape. The schema puts the fact (`explain`) first, so the model writes the fact before the question.
 - **Streaming:** it reads the server-sent events and pulls out each question the moment its JSON object closes.
 - **Speed:** it sets the lowest useful thinking level (`thinkingConfig.thinkingLevel`: `low` on 3.8 Flash, `minimal` on Flash-Lite; one step more for maths), so the first question arrives fast.
@@ -250,7 +261,7 @@ git remote add origin https://github.com/<your-username>/<your-repo>.git
 git push -u origin main
 ```
 
-No API key is ever committed. Each person adds their own key in the app.
+No API key is ever committed. `js/config.js` only holds the shared AI's public Firebase settings; a player's own key stays in their browser.
 
 ## CI with Jenkins
 
@@ -264,4 +275,4 @@ It works on Linux and Windows build machines.
 
 ## Deploy to GitHub Pages
 
-Go to **Settings → Pages → Deploy from a branch** and choose `main` and `/ (root)`. AI questions work there too: each visitor adds their own free Gemini key.
+Go to **Settings → Pages → Deploy from a branch** and choose `main` and `/ (root)`. AI questions work there too: with the shared AI set up, visitors need no key; otherwise each visitor adds their own free Gemini key.

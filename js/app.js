@@ -67,6 +67,10 @@
   };
   const DEFAULT_MODEL = 'gemini-3.8-flash';
   const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+  // Shared AI (js/config.js): the owner's Firebase project, so players don't need their own key.
+  const CFG = window.QUIZNOVA_CONFIG || {};
+  const sharedAI = !!(CFG.firebase && CFG.firebase.apiKey && CFG.firebase.projectId && CFG.firebase.appId);
+  const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/13.0.0';
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   // Slow devices (set in index.html) get fewer decorative effects.
   const lite = document.documentElement.classList.contains('lite');
@@ -282,12 +286,13 @@
   store.del('qn.ai'); // settings for the old AI options (Claude, Chrome's built-in AI): no longer used
 
   /* ================= AI settings ================= */
-  // Google's Gemini, with the player's own API key (free from Google AI Studio).
+  // Google's Gemini: the player's own API key (free from Google AI Studio) if they added one, otherwise the
+  // shared AI from js/config.js.
   function aiCfg() {
     const c = store.get(K.ai, {}) || {};
     return { key: typeof c.key === 'string' ? c.key : '', model: AI_MODELS[c.model] ? c.model : DEFAULT_MODEL };
   }
-  const aiReady = () => !!aiCfg().key;
+  const aiReady = () => sharedAI || !!aiCfg().key;
   const aiLabel = () => AI_MODELS[aiCfg().model].label;
   const defaultSource = subject => isGen(subject) ? 'local' : aiReady() || !hasLocal(subject) ? 'ai' : 'local';
   // Subjects with checked film data (data.js FILMS): AI rounds take their questions from it (see startFilmFeed).
@@ -697,17 +702,19 @@ Format:
 
   // Streams questions from Gemini, calling onQuestion(raw) for each one as it completes. A spec can bring its own
   // prompt, JSON schema and system prompt (used to reword checked questions); otherwise it asks for new questions.
+  // Uses the player's own key if they added one, otherwise the shared AI (Firebase AI Logic, js/config.js).
   // If the chosen model is out of free quota, busy or unavailable before anything arrives, the other model takes
   // over (spec.onModel hears which).
   async function aiGenerate(spec, onQuestion, signal) {
     const cfg = aiCfg();
-    if (!cfg.key) throw new Error('no-key');
+    if (!cfg.key && !sharedAI) throw new Error('no-key');
     const req = { prompt: spec.prompt || aiPrompt(spec), system: spec.system || AI_SYSTEM, schema: spec.schema || QUESTION_SCHEMA, maths: isMathsSpec(spec) };
+    const stream = cfg.key ? (model, r, emit) => geminiStream(cfg.key, model, r, emit, signal) : (model, r, emit) => firebaseStream(model, r, emit, signal);
     const models = [cfg.model, ...Object.keys(AI_MODELS).filter(m => m !== cfg.model)];
     let got = 0;
     for (let k = 0, think = true; ;) {
       try {
-        return await geminiStream(cfg.key, models[k], { ...req, think }, raw => { got++; onQuestion(raw); }, signal);
+        return await stream(models[k], { ...req, think }, raw => { got++; onQuestion(raw); });
       } catch (err) {
         if (got) throw err;
         // A model that stops accepting the thinking setting still works without it.
@@ -780,6 +787,70 @@ Format:
     return Object.assign(new Error(e.message || `HTTP ${res.status}`), { gemini: true, status: res.status, apiStatus: e.status || '', reason });
   }
 
+  /* ---------- Shared AI: Firebase AI Logic on the owner's project (js/config.js) ---------- */
+  // Firebase's libraries load from Google's CDN the first time someone starts an AI game. App Check (reCAPTCHA)
+  // attaches a token to every request, so the owner's project only answers this website.
+  let firebasePromise = null;
+  function loadFirebase() {
+    if (!firebasePromise) {
+      firebasePromise = Promise.all(['firebase-app', 'firebase-app-check', 'firebase-ai'].map(m => import(`${FIREBASE_SDK}/${m}.js`)))
+        .then(([fbApp, fbCheck, fbAI]) => {
+          const app = fbApp.initializeApp(CFG.firebase, 'quiznova');
+          const ac = CFG.appCheck || {};
+          if (ac.siteKey) {
+            const Provider = ac.provider === 'recaptcha-enterprise' ? fbCheck.ReCaptchaEnterpriseProvider : fbCheck.ReCaptchaV3Provider;
+            fbCheck.initializeAppCheck(app, { provider: new Provider(ac.siteKey), isTokenAutoRefreshEnabled: true });
+          }
+          return { fbAI, ai: fbAI.getAI(app, { backend: new fbAI.GoogleAIBackend() }) };
+        })
+        .catch(err => { firebasePromise = null; throw Object.assign(new Error('sdk-load'), { cause: err }); });
+    }
+    return firebasePromise;
+  }
+
+  async function firebaseStream(model, { prompt, system, schema, maths, think }, emit, signal) {
+    const { fbAI, ai } = await loadFirebase();
+    const generationConfig = { responseMimeType: 'application/json', responseJsonSchema: schema, maxOutputTokens: 16384 };
+    if (think) generationConfig.thinkingConfig = { thinkingLevel: fbAI.ThinkingLevel[(maths ? AI_MODELS[model].mathsThink : AI_MODELS[model].think).toUpperCase()] };
+    const gm = fbAI.getGenerativeModel(ai, { model, systemInstruction: system, generationConfig });
+    const parser = createQuestionParser(emit);
+    let stopped = '', sent = 0;
+    try {
+      const { stream, response } = await gm.generateContentStream(prompt, { signal });
+      response.catch(() => {}); // the full-response promise also rejects when a filled game stops the stream early
+      for await (const chunk of stream) {
+        const cand = chunk.candidates && chunk.candidates[0];
+        if (chunk.promptFeedback && chunk.promptFeedback.blockReason) stopped = chunk.promptFeedback.blockReason;
+        if (cand && cand.finishReason && !['STOP', 'MAX_TOKENS', 'FINISH_REASON_UNSPECIFIED'].includes(cand.finishReason)) stopped = cand.finishReason;
+        let text = '';
+        try { text = chunk.text(); } catch { /* a blocked chunk has no text */ }
+        if (text) { sent++; parser.push(text); }
+      }
+    } catch (err) {
+      throw signal && signal.aborted ? new DOMException('The game ended.', 'AbortError') : firebaseError(err);
+    }
+    if (stopped && !sent) throw Object.assign(new Error(stopped), { blocked: stopped });
+  }
+
+  // Firebase's errors in the same shape as Gemini's: the status drives the model fallback and the message shown.
+  function firebaseError(err) {
+    if (err && err.name === 'AbortError') return err;
+    const code = err && err.code, data = (err && err.customErrorData) || {}, msg = (err && err.message) || String(err);
+    if (code === 'api-not-enabled') return Object.assign(new Error(msg), { sharedSetup: true });
+    if (code === 'fetch-error' && data.status) {
+      return Object.assign(new Error(msg), { gemini: true, shared: true, status: data.status, appCheck: [401, 403].includes(data.status) && /app ?check|attestation/i.test(msg) });
+    }
+    if (code === 'error' && /error fetching/i.test(msg)) return Object.assign(new Error('network'), { network: true });
+    return Object.assign(new Error(msg), { shared: true });
+  }
+
+  // A one-word request through the shared AI (AI settings → Test).
+  async function testShared(model) {
+    const { fbAI, ai } = await loadFirebase();
+    try { await fbAI.getGenerativeModel(ai, { model, generationConfig: { maxOutputTokens: 256 } }).generateContent('Reply with the word OK.'); }
+    catch (err) { throw firebaseError(err); }
+  }
+
   // An AI question whose own parts disagree (its "correct" text, its explanation and the answer it marked)
   // is probably wrong, so it is dropped. Costs nothing: no extra AI call.
   const UNSURE = 'unsure';
@@ -841,8 +912,15 @@ Format:
     if (!err) return null;
     if (err.name === 'AbortError') return null;
     if (err.message === 'no-key') return { msg: 'Add your free Gemini API key in AI settings to use AI questions.', key: true };
+    if (err.message === 'sdk-load') return { msg: 'Couldn’t load the AI — check your internet connection.' };
     if (err.network) return { msg: 'Couldn’t reach Gemini — check your internet connection.' };
     if (err.blocked) return { msg: 'Gemini wouldn’t write questions on that topic — try a different one.' };
+    // The shared AI (the owner's Firebase project).
+    if (err.sharedSetup) return { msg: 'QuizNova’s shared AI isn’t switched on yet. Add your own free Gemini key in AI settings, or try again later.', key: true };
+    if (err.appCheck) return { msg: 'QuizNova couldn’t confirm this is the real QuizNova website (App Check). Reload the page and try again.' };
+    if (err.shared && err.status === 429) return { msg: 'QuizNova’s free shared AI limit is used up for now. Try again later, or add your own free Gemini key in AI settings to keep playing.', key: true };
+    if (err.shared && err.status >= 500) return { msg: 'Gemini is busy right now — try again in a moment.' };
+    if (err.shared) return { msg: `QuizNova’s shared AI isn’t working right now${err.status ? ` (${err.status})` : ''}. Add your own free Gemini key in AI settings, or try again later.`, key: true };
     if (err.gemini) {
       const s = err.status;
       if (err.reason === 'API_KEY_INVALID' || s === 401) return { msg: 'Your Gemini API key was rejected — check it in AI settings.', key: true };
@@ -1405,9 +1483,14 @@ Latency-sensitive; begin your visible answer immediately.`;
         </div>` : ''}
         <button class="btn ${ctx === 'player' ? 'btn-red' : 'btn-ink'} btn-lg btn-block" type="submit">${submit}</button>
         <p class="note">${icon('lock')}${ctx === 'player' ? 'IDs and scores stay in this browser.' : 'IDs and scores stay in this browser, and you stay logged in until you log out.'}</p>
+        ${ctx === 'main' ? recaptchaNote() : ''}
       </form>
       ${deviceIdsHTML(ctx)}`;
   }
+  // The shared AI's App Check uses reCAPTCHA; its floating badge is hidden (it covers the phone navigation),
+  // so Google's notice is shown in the page instead.
+  const recaptchaNote = () => sharedAI && CFG.appCheck && CFG.appCheck.siteKey
+    ? '<p class="fine-print">This site is protected by reCAPTCHA and the Google <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Privacy Policy</a> and <a href="https://policies.google.com/terms" target="_blank" rel="noopener">Terms of Service</a> apply.</p>' : '';
   const authBox = ctx => ctx === 'player' ? $('#player-auth') : $('#auth-main');
   function switchAuthMode(ctx, mode, id = '') {
     const box = authBox(ctx);
@@ -1656,12 +1739,21 @@ Latency-sensitive; begin your visible answer immediately.`;
     $('#ai-key').value = cfg.key;
     $('#ai-key').type = 'password';
     $('#form-ai').elements.model.value = cfg.model;
+    // With the shared AI on, a player's own key is optional (a backup for when the shared limit runs out).
+    $('#ai-shared').hidden = !sharedAI;
+    $('#ai-title').textContent = sharedAI ? 'AI questions' : 'Turn on AI questions';
+    if (sharedAI) $('#ai-intro').textContent = 'Google’s Gemini writes brand-new questions every game, on any subject or any topic you type, at exactly the difficulty you pick.';
+    $('#ai-key-label').textContent = sharedAI ? 'Your own Gemini key (optional)' : 'Gemini API key';
+    $('#ai-recaptcha').innerHTML = recaptchaNote();
+    paintTestLabel();
     paintModelHint();
     aiStatus(message || '', message ? tone : '');
     $$('dialog[open]').forEach(d => { if (d.id !== 'dlg-ai') d.close(); });
     openDialog($('#dlg-ai'));
   }
   const pickedModel = () => AI_MODELS[$('#form-ai').elements.model.value] ? $('#form-ai').elements.model.value : DEFAULT_MODEL;
+  // "Test AI" checks the shared AI when no key is typed; "Test key" checks the player's own key.
+  const paintTestLabel = () => { $('[data-action="ai-test"]').lastChild.textContent = sharedAI && !$('#ai-key').value.trim() ? 'Test AI' : 'Test key'; };
   function paintModelHint() {
     $('#ai-model-hint').textContent = pickedModel() === DEFAULT_MODEL
       ? `${AI_MODELS[DEFAULT_MODEL].label}: the most accurate, best for hard questions. The first question arrives in a few seconds.`
@@ -1680,6 +1772,7 @@ Latency-sensitive; begin your visible answer immediately.`;
   }
   // Catches a pasted key that can't be a Gemini key (including an Anthropic key from the old Claude option).
   function keyProblem(key) {
+    if (!key && sharedAI) return ''; // the shared AI needs no key
     if (!key) return 'Paste your Gemini API key first.';
     if (/^sk-ant-/.test(key)) return 'That’s a Claude (Anthropic) key. QuizNova now uses Gemini: create a free key in Google AI Studio.';
     if (key.length < 20 || /\s/.test(key)) return 'That doesn’t look like a Gemini API key. Copy the whole key from Google AI Studio.';
@@ -1693,16 +1786,21 @@ Latency-sensitive; begin your visible answer immediately.`;
     store.set(K.ai, { key, model: pickedModel() });
     $('#dlg-ai').close();
     afterAIChange();
-    toast(`AI questions on · ${aiLabel()}`, 'sparkle', 'good');
+    toast(`AI questions on · ${aiLabel()}${key || !sharedAI ? '' : ' (shared)'}`, 'sparkle', 'good');
   }
-  // A one-word request checks the key, the model and that Gemini can be used from here.
+  // A one-word request checks the key (or the shared AI), the model and that Gemini can be used from here.
   async function testAIKey(btn) {
     const key = $('#ai-key').value.trim(), model = pickedModel();
     const problem = keyProblem(key);
     if (problem) { aiStatus(problem, 'bad'); return; }
     btn.disabled = true;
-    aiStatus('Checking your key…');
+    aiStatus(key ? 'Checking your key…' : 'Checking QuizNova’s shared AI…');
     try {
+      if (!key) {
+        await testShared(model);
+        aiStatus(`The shared AI works: ${AI_MODELS[model].label} is ready.`, 'good');
+        return;
+      }
       let res;
       try {
         res = await fetch(`${GEMINI_URL}/${model}:generateContent`, {
@@ -4091,7 +4189,8 @@ Latency-sensitive; begin your visible answer immediately.`;
       case 'ai-remove':
         $('#ai-key').value = '';
         store.set(K.ai, { key: '', model: pickedModel() });
-        aiStatus('Key removed from this browser.', '');
+        aiStatus(sharedAI ? 'Your key is removed: QuizNova’s shared AI writes your questions.' : 'Key removed from this browser.', '');
+        paintTestLabel();
         afterAIChange();
         break;
       case 'ai-later':
@@ -4224,6 +4323,7 @@ Latency-sensitive; begin your visible answer immediately.`;
         if (err) err.textContent = '';
       }
       if (el.id === 'solo-topic') $('#solo-topic-err').textContent = '';
+      if (el.id === 'ai-key') paintTestLabel();
       if (el.id === 'r-topic') $('#r-topic-err').textContent = '';
       if (el.id === 'join-code') {
         const v = el.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);

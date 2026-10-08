@@ -155,18 +155,19 @@
         <span class="ic-circle red" data-icon="sparkle"></span>
         <div>
           <h2 id="ai-title">Turn on AI questions</h2>
-          <p class="muted">Google’s Gemini writes brand-new questions every game, on any subject or any topic you type, at exactly the difficulty you pick. It’s free: you only need a Gemini API key from your Google account. Without AI, you play each subject’s small set of built-in questions, which repeat.</p>
+          <p class="muted" id="ai-intro">Google’s Gemini writes brand-new questions every game, on any subject or any topic you type, at exactly the difficulty you pick. It’s free: you only need a Gemini API key from your Google account. Without AI, you play each subject’s small set of built-in questions, which repeat.</p>
         </div>
         <button type="button" class="icon-btn sm" data-close aria-label="Close"><span data-icon="x"></span></button>
       </header>
       <div class="form-stack">
+        <p class="ai-status" id="ai-shared" data-tone="good" hidden>✓ AI is already on for everyone: QuizNova’s shared Gemini writes your questions, no key needed. If its free daily limit runs out, you can add your own free key below.</p>
         <ol class="ai-steps">
           <li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio → API keys</a> and sign in with your Google account.</li>
           <li>Press <b>Create API key</b>, then copy the key.</li>
           <li>Paste it below, press <b>Test key</b>, then <b>Save</b>.</li>
         </ol>
         <div class="field">
-          <label for="ai-key">Gemini API key</label>
+          <label for="ai-key" id="ai-key-label">Gemini API key</label>
           <div class="input-group">
             <input class="input mono" id="ai-key" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="Paste your key">
             <button type="button" class="icon-btn sm" data-toggle-pass="ai-key" aria-label="Show key"><span data-icon="eye"></span></button>
@@ -184,6 +185,7 @@
         </div>
         <p class="note"><span data-icon="lock"></span>Don’t save your key on a shared or public computer — anyone using this browser could use it.</p>
         <p class="ai-status" id="ai-status" role="status" hidden></p>
+        <div id="ai-recaptcha"></div>
       </div>
       <footer class="modal-foot wrap">
         <button type="button" class="btn" data-action="ai-later">Not now</button>
@@ -337,6 +339,7 @@
 
   <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
 
+  <script src="js/config.js"></script>
   <script src="js/data.js"></script>
   <script src="js/maths.js"></script>
   <script src="js/app.js"></script>

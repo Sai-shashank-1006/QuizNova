@@ -934,6 +934,10 @@ body.logged-out .sidebar, body.logged-out .needs-user { display: none !important
 .ai-steps b { color: var(--text); }
 .ai-steps a { color: var(--red); font-weight: 800; }
 .ai-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+/* Shared AI: reCAPTCHA's floating badge would cover the phone navigation, so its notice is shown in the page instead. */
+.grecaptcha-badge { visibility: hidden !important; }
+.fine-print { margin-top: 12px; font-size: .74rem; font-weight: 600; line-height: 1.45; color: var(--text-3); }
+.fine-print a { color: inherit; text-decoration: underline; }
 
 .ai-banner { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 16px; margin: -10px 0 26px; padding: 16px 18px; box-shadow: inset 0 0 0 2px var(--red), var(--neu); }
 .ai-banner b { display: block; font-size: 1rem; }
