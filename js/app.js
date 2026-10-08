@@ -56,7 +56,7 @@
   const BT = { intro: 3000, read: 2500, open: 12000, answer: 6000, reveal: 2600 }; // battle phase lengths (ms)
   const K = {
     accounts: 'qn.accounts', current: 'qn.current', games: 'qn.games', prefs: 'qn.prefs', theme: 'qn.theme',
-    ai: 'qn.gemini', seen: 'qn.seen', aiHist: 'qn.aihist',
+    ai: 'qn.gemini', seen: 'qn.seen', aiHist: 'qn.aihist', aiAsked: 'qn.aiAsked',
   };
   const ID_RE = /^[A-Za-z0-9_-]{3,16}$/;
   // Gemini models (both on Google's free tier). `think` is the thinking level for quiz questions and for maths:
@@ -1404,7 +1404,7 @@ Latency-sensitive; begin your visible answer immediately.`;
           <p class="err" data-err="confirm"></p>
         </div>` : ''}
         <button class="btn ${ctx === 'player' ? 'btn-red' : 'btn-ink'} btn-lg btn-block" type="submit">${submit}</button>
-        <p class="note">${icon('lock')}IDs and scores stay in this browser.</p>
+        <p class="note">${icon('lock')}${ctx === 'player' ? 'IDs and scores stay in this browser.' : 'IDs and scores stay in this browser, and you stay logged in until you log out.'}</p>
       </form>
       ${deviceIdsHTML(ctx)}`;
   }
@@ -1482,16 +1482,20 @@ Latency-sensitive; begin your visible answer immediately.`;
     showView('home');
     toast(isNew ? `Welcome to QuizNova, ${acc.id}!` : `Welcome back, ${acc.id}!`, 'check', 'good');
     paintAIChip();
+    keepLoginSaved();
     maybePromptAI();
   }
-  // Offer to turn on AI once per browser session while it's off.
+  // Offer to turn on AI once on this device while it's off (the home screen keeps a banner for later).
   function maybePromptAI() {
-    if (!S.user || aiReady() || S.view !== 'home' || $('dialog[open]')) return;
-    try {
-      if (sessionStorage.getItem('qn.aiAsked')) return;
-      sessionStorage.setItem('qn.aiAsked', '1');
-    } catch { /* storage blocked: ask anyway */ }
+    if (!S.user || aiReady() || S.view !== 'home' || $('dialog[open]') || store.get(K.aiAsked)) return;
+    store.set(K.aiAsked, true);
     openAISettings();
+  }
+  // Players stay logged in until they log out: ask the browser not to clear saved data when it runs low on space.
+  function keepLoginSaved() {
+    try {
+      if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(on => on || navigator.storage.persist()).catch(() => {});
+    } catch { /* not supported */ }
   }
   async function logout() {
     netLeave();
