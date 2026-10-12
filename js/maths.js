@@ -410,11 +410,21 @@
 
   const KINDS = { arith: ARITH, algebra1: ALGEBRA1, algebra: ALGEBRA, geometry: GEOMETRY, calculus: CALCULUS };
   const TX = { easy: 1, medium: 1.3, hard: 1.6 };
+  // Other generators (js/aptitude.js) add kinds with register(). A group ("mix", "apt-mix") is a set of kinds played
+  // together; META holds each added kind's topic name and time factors.
+  const GROUPS = { mix: Object.keys(KINDS) };
+  const META = {};
+  function register(kind, makers, { topic = '', tx = null, group = null } = {}) {
+    KINDS[kind] = makers;
+    META[kind] = { topic, tx };
+    if (group) (GROUPS[group] = GROUPS[group] || []).push(kind);
+  }
 
   /* ---------- Turning a problem into a quiz question ---------- */
-  function assemble(s, lv, h, mcqOnly) {
-    const fmt = v => (typeof v === 'number' ? num(v) + (s.u || '') : v);
-    const base = { q: s.q, explain: s.ex, difficulty: lv, tx: s.tx || TX[lv], gen: true };
+  // s.pre is put before numeric options (₹), s.u after them (%, km/h).
+  function assemble(s, lv, h, mcqOnly, meta = {}) {
+    const fmt = v => (typeof v === 'number' ? (s.pre || '') + num(v) + (s.u || '') : v);
+    const base = { q: s.q, explain: s.ex, difficulty: lv, tx: s.tx || (meta.tx || TX)[lv], gen: true };
     const numeric = typeof s.a === 'number';
     const wrongs = numeric ? nearNums(s.a, h, (s.x || []).filter(v => Number.isFinite(v))).map(fmt) : (s.w || []);
     const correct = fmt(s.a);
@@ -443,7 +453,8 @@
 
   function build(kind, n, random, { mcqOnly = false, difficulty = 'mixed' } = {}) {
     const h = tools(random);
-    const kinds = kind === 'mix' ? h.shuffle(Object.keys(KINDS)) : [KINDS[kind] ? kind : 'arith'];
+    const group = GROUPS[kind];
+    const kinds = group ? h.shuffle(group) : [KINDS[kind] ? kind : 'arith'];
     const levels = levelsFor(difficulty, n);
     const out = [], seen = new Set(), lastMaker = {};
     for (let i = 0, guard = 0; out.length < n && guard < n * 40; guard++) {
@@ -452,9 +463,13 @@
       let m = h.int(0, makers.length - 1);
       if (makers.length > 1 && m === lastMaker[k + lv]) m = (m + 1) % makers.length; // no same problem type twice in a row
       const spec = makers[m](h);
-      if (seen.has(spec.q)) continue;
-      const q = assemble(spec, lv, h, mcqOnly);
+      if (!spec || seen.has(spec.q)) continue;
+      const meta = META[k] || {};
+      const q = assemble(spec, lv, h, mcqOnly, meta);
       if (!q) continue;
+      // The sub-topic it practises (and, in a mixed test, its topic), shown with the question.
+      const tag = [group && meta.topic, spec.t].filter(Boolean).join(' · ');
+      if (tag) q.tag = tag;
       seen.add(spec.q);
       lastMaker[k + lv] = m;
       out.push(q);
@@ -463,13 +478,17 @@
     return out;
   }
 
-  // Reads a typed number: "12", "-3", "−3", "3/4", "0.75", "x = 5", "68°".
+  // Reads a typed number: "12", "-3", "−3", "3/4", "0.75", "x = 5", "68°", "₹450", "45 km/h".
   function parseNumber(text) {
-    const t = String(text).normalize('NFKC').replace(/[−–]/g, '-').replace(/[\s,]/g, '').replace(/^x=/i, '').replace(/[^\d./+-]+$/, '');
+    const t = String(text).normalize('NFKC').replace(/[−–]/g, '-').replace(/[\s,]/g, '').replace(/^x=/i, '')
+      .replace(/^(?:₹|rs\.?|inr)/i, '').replace(/[a-z][a-z/]*[23]?$/i, '').replace(/[^\d./+-]+$/, ''); // NFKC made m² into m2
     const f = t.match(/^([+-]?\d+(?:\.\d+)?)\/([+-]?\d+(?:\.\d+)?)$/);
     if (f) return +f[2] ? +f[1] / +f[2] : NaN;
     return /^[+-]?(\d+\.?\d*|\.\d+)$/.test(t) ? +t : NaN;
   }
 
-  window.QUIZ_MATHS = { build, parseNumber, KINDS: Object.keys(KINDS) };
+  window.QUIZ_MATHS = {
+    build, parseNumber, register, KINDS: Object.keys(KINDS),
+    helpers: { num, frac, gcd, lcm, sup, MINUS, nearNums },
+  };
 })();

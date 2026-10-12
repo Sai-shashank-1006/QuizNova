@@ -398,6 +398,11 @@ body.logged-out .sidebar, body.logged-out .needs-user { display: none !important
 .subject-card h3 { font-size: 1.3rem; margin-top: 6px; }
 .sc-tag { font-size: .9rem; color: var(--text-2); min-height: 2.7em; }
 .sc-meta { display: flex; justify-content: space-between; gap: 8px; font-size: .82rem; font-weight: 700; color: var(--text-3); }
+/* Aptitude tab: how to work through the numbered topics. */
+.apt-path { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 14px; padding: 16px 18px; }
+.apt-path .ic-circle { flex: none; }
+.apt-path p { font-size: .92rem; font-weight: 600; color: var(--text-2); }
+.apt-path b { color: var(--text); }
 .sc-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
 .sc-actions .btn { padding-left: .6em; padding-right: .6em; }
 
@@ -577,6 +582,8 @@ body.logged-out .sidebar, body.logged-out .needs-user { display: none !important
 .time-text.low b { color: var(--red); }
 
 .q-text { font-size: clamp(1.35rem, 2.5vw, 1.85rem); font-weight: 600; letter-spacing: -.02em; line-height: 1.28; margin-bottom: 22px; }
+.q-topic { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: .76rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--red); }
+.q-topic svg.ic { flex: none; width: 14px; height: 14px; }
 
 .code {
   margin: 0 0 22px; padding: 18px 20px; border-radius: 22px;
@@ -736,6 +743,7 @@ body.logged-out .sidebar, body.logged-out .needs-user { display: none !important
 .rv.bad .rv-n { background: var(--red-fill); color: #fff; box-shadow: none; }
 .rv-body { flex: 1; min-width: 0; }
 .rv-q { font-weight: 700; }
+.rv-tag { margin-bottom: 2px; font-size: .7rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
 .rv-a { margin-top: 4px; font-size: .86rem; color: var(--text-2); font-weight: 600; overflow-wrap: anywhere; }
 .rv-a b { color: var(--text); }
 .rv-pts { flex: none; font-weight: 800; font-variant-numeric: tabular-nums; }

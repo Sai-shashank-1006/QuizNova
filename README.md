@@ -10,6 +10,7 @@ QuizNova is a quiz game built with **HTML5, CSS3 and JavaScript**. It runs in an
 - **No repeats:** QuizNova remembers the questions you've had and their answers, and throws away any the AI repeats, even reworded.
 - **Mystery boxes:** in battles and online rooms, boxes drop on random questions. The fastest right answer wins a power-up: 50:50, +10 s or Skip.
 - **Real maths:** the Maths subjects are solvable problems (arithmetic, algebra, geometry, calculus) that QuizNova makes and checks itself, with no AI needed (or pick AI if you prefer).
+- **Aptitude:** quantitative aptitude for SSC, banking, railway and placement tests, in 16 topics you learn in order, each with easy, medium and hard problems, plus a full mixed Aptitude Test.
 - **Built-in questions:** 231 questions work fully offline when AI is off. AI rounds never mix them in.
 - **Phones and PCs:** the layout adapts from a wide desktop down to a small phone, with a bottom navigation bar and a score bar on small screens. Slow devices automatically get a lighter version with fewer looping animations.
 - **Look:** a neumorphic (soft, raised) design in light grey, near-black and red, with light and dark modes and lots of motion (see [Animations](#animations)).
@@ -74,6 +75,7 @@ For the most accurate AI questions, use Gemini 3.6 Flash. For guaranteed-correct
 |---|---|---|
 | Educational | HTML & CSS, JavaScript, Git & DevOps, Data Structures, Science | Geography, History |
 | Maths | Mathematics (a mix), Arithmetic, Basic Algebra, Algebra, Geometry & Trig, Calculus: endless generated problems, no AI needed | — |
+| Aptitude | Aptitude Test (all topics mixed) and 16 topics from Number System to Probability: endless generated problems, no AI needed | — |
 | Comics | Marvel, DC | — |
 | Movies | Hollywood, MCU (Marvel Cinematic Universe), Indian Cinema, TFI (Telugu cinema: the tier-1 heroes and star directors; AI rounds use checked film data), Dune (Part One and Part Two) | Harry Potter, Star Wars |
 | Series | Game of Thrones, House of the Dragon | Series Mix, Stranger Things, Breaking Bad, Money Heist, Squid Game, Friends, The Office, Indian Web Series, K-Dramas, Cartoons |
@@ -106,6 +108,36 @@ You can still choose **AI** for a Maths subject in the Solo or Battle setup (**G
 - **Typed answers** are checked by value, so `-3`, `−3`, `3/4` and `0.75` all work, and `25` is never taken for `2.5`.
 - **Harder problems get more time:** up to twice the normal limit.
 - **Difficulty** is picked in the Solo, Battle and Online setups. **Challenge codes** carry the exact problems, so a friend gets the same ones.
+
+## Aptitude
+
+Quantitative aptitude in the style of competitive exams (SSC, banking, railways, campus placements). Like Maths, the problems are generated from random numbers (in `js/aptitude.js`) with the answer worked out first, so every answer is right and the questions never run out.
+
+The **Aptitude** tab lists 16 topics, numbered in the order to learn them. Play each one on Easy, then Medium, then Hard. Every question shows the sub-topic it practises (for example *Percentages · Successive change*), and every answer comes with its worked method. The **Aptitude Test** mixes all 16 topics, like a real paper.
+
+| # | Topic | Easy | Medium | Hard |
+|---|---|---|---|---|
+| 1 | Number System | Unit digit of a product, divisibility rules, number to add for divisibility | Unit digit of powers (cyclicity), remainders, number of factors | Trailing zeros of n!, remainder of a power, counting multiples, sum of factors |
+| 2 | HCF & LCM | HCF, LCM | HCF × LCM = product, LCM of three, bells ringing together | LCM with a remainder, HCF with remainders, same remainder |
+| 3 | Simplification | BODMAS, a² − b², decimals | × 99 / 101 / 1001, (a + b)² − (a − b)², fractions of a number, square roots | Telescoping sums, ratio substitution, approximation |
+| 4 | Number Series | Arithmetic and geometric series | Squares ± c, growing differences, alternating rules, cubes | ×n + n, differences that are squares, n(n + 1), sum of previous two |
+| 5 | Percentages | Percent of, what percent, finding the whole | Successive change, more than / less than, price and consumption, original price | Pass marks, elections, population growth, income and savings |
+| 6 | Profit & Loss | Profit/loss %, selling price, discount | Successive discounts, articles bought and sold, cost price | Loss to gain, mark-up with discount, false weights, marking above cost |
+| 7 | Simple & Compound Interest | SI, amount, rate | Doubling time, CI for 2 and 3 years | CI − SI, finding the rate, half-yearly compounding, compound growth |
+| 8 | Ratio & Partnership | Dividing in a ratio, fourth proportional | Combining ratios, mean proportional, partnership, coins | Partnership over time, ratio after a change, inverse ratios |
+| 9 | Averages | Average of numbers and sequences, changing every number | Removing a number, batting average, replacing a person | Including a new member, overlapping averages |
+| 10 | Problems on Ages | Sum and difference, ratios, past and future | Ages in the past, ratios now and later | Sum of ages, multiples of age, product of ages |
+| 11 | Mixtures & Alligation | Price of a mixture, parts of a mixture | Alligation rule, adding water, watering milk for profit | Repeated replacement, mixing two vessels |
+| 12 | Time & Work | Working together, men and days | One worker's time, pipes and cisterns, efficiency | Leaving midway, chain rule, three pipes |
+| 13 | Speed, Distance & Time | km/h ↔ m/s, speed = distance ÷ time | Average speed, trains passing a pole or platform, boats | Two trains, boats and streams, late and early, chasing |
+| 14 | Mensuration | Rectangle, square from its diagonal, cube | Circle, cylinder, cost of fencing (π = 22/7) | Cone, sphere, % change in area, longest rod in a room |
+| 15 | Permutations & Combinations | n!, nCr, arranging letters | Words with repeated letters, committees, forming numbers, handshakes | Vowels together, circular seating, diagonals, triangles from points |
+| 16 | Probability | Dice, balls, coins, picking a number | Two dice, cards, drawing two balls | Two-dice events, mixed pairs, two cards, independent events |
+
+- **Wrong options** are the classic exam traps: adding percentages instead of compounding them, dividing by the selling price, taking the simple average of two speeds, forgetting the remainder.
+- **Answers** with money, units or percentages (₹450, 45 km/h, 450 cm², 25%) can be typed with or without the ₹ or the unit.
+- **More time:** aptitude problems get 1.6× (easy) to 2.8× (hard) the normal limit, since they need working out.
+- Choosing **AI** for an aptitude subject (or typing a topic like "profit and loss") asks for competitive-exam style problems with ₹ and π = 22/7.
 
 ## Game modes
 
@@ -237,6 +269,7 @@ Quiz Application/
 │   ├── config.js   # Owner settings: the shared AI (Firebase project and App Check key)
 │   ├── data.js     # Categories, subjects (with AI topics) and the 231 built-in questions
 │   ├── maths.js    # Maths problem generator: arithmetic → calculus, answers worked out by QuizNova
+│   ├── aptitude.js # Aptitude problem generator: 16 quantitative-aptitude topics, easy → hard
 │   └── app.js      # Accounts, AI question streaming (Gemini), solo, battle and online engines, mystery boxes, challenge codes, stats, motion helpers
 ├── Jenkinsfile     # CI pipeline: checkout → validate → package
 └── README.md
