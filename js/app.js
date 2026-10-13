@@ -611,6 +611,11 @@
     additionalProperties: false,
   };
 
+  const CODE_SCHEMA = (() => {
+    const item = QUESTION_SCHEMA.properties.questions.items;
+    return { ...QUESTION_SCHEMA, properties: { questions: { type: 'array', items: { ...item, properties: { code: { type: 'string' }, ...item.properties }, required: ['code', ...item.required] } } } };
+  })();
+
   const AI_SYSTEM = `You write questions for QuizNova, a fast and fun quiz game played by students and friends.
 
 Accuracy comes first:
@@ -644,7 +649,11 @@ Format:
   const MATHS_TOPIC = /\b(maths?|mathematics|arithmetic|algebra|calculus|geometry|trigonometry|trig|equations?|fractions?|percentages?|integrals?|integration|derivatives?|differentiation|quadratics?|aptitude|quant|quantitative|profit and loss|simple interest|compound interest|time and work|time and distance|speed and distance|alligation|mensuration|permutations?|combinations?|probability)\b/i;
   const APT_TOPIC = /\b(aptitude|quant|quantitative|profit and loss|interest|time and work|distance|alligation|mensuration)\b/i;
   const GATE_TOPIC = /\bgate\b/i, CAT_TOPIC = /\bcat\s+(exam|quant|qa|dilr|di|lr|prep|preparation|mock|maths?)\b/i;
-  const isMathsSpec = ({ subject, topic }) => (isGen(subject) && !SUBJ[subject].coding) || (subject === 'custom' && (MATHS_TOPIC.test(topic || '') || GATE_TOPIC.test(topic || '') || CAT_TOPIC.test(topic || '')));
+  // Coding games (the DSA subject, or a typed topic that is clearly about data structures and algorithms) get questions
+  // about code logic only, with snippets whose output QuizNova checks by running them (see checkCode).
+  const CODING_TOPIC = /\b(dsa|data structures?|algorithms?|linked lists?|binary (search )?trees?|bst|sorting|recursion|dynamic programming|leetcode|coding interviews?|stacks? and queues?|hash ?maps?|heaps?|tries|big-?o|time complexity|two pointers|sliding window|backtracking|graph algorithms?)\b/i;
+  const isCodingSpec = ({ subject, topic }) => (SUBJ[subject] && !!SUBJ[subject].coding) || (subject === 'custom' && CODING_TOPIC.test(topic || ''));
+  const isMathsSpec = ({ subject, topic }) => !isCodingSpec({ subject, topic }) && ((isGen(subject) && !SUBJ[subject].coding) || (subject === 'custom' && (MATHS_TOPIC.test(topic || '') || GATE_TOPIC.test(topic || '') || CAT_TOPIC.test(topic || ''))));
   // The exam a game is practising for (Aptitude, GATE, CAT), whose style the AI should copy; null otherwise.
   const examOf = ({ subject, topic }) => {
     if (subject !== 'custom') return (SUBJ[subject] && CAT[SUBJ[subject].category].exam) || null;
@@ -679,8 +688,37 @@ Format:
     ].filter(Boolean).join('\n\n');
   }
 
+  const CODING_KINDS = ['code tracing: what a short function returns or prints', 'time or space complexity of a snippet',
+    'which data structure or approach solves a described problem best', 'finding the bug, or the line that fixes a snippet',
+    'what happens at an edge case (empty input, one element, duplicates, negatives)', 'filling in the missing line of an algorithm'];
+  const CODE_TX = { easy: 1.8, medium: 2.4, hard: 3 }; // code to read and trace
+
+  function codingPrompt({ about, n, difficulty, mcqOnly, avoid, focus }) {
+    const tf = Math.max(1, Math.round(n / 8)), written = Math.max(1, Math.round(n / 6));
+    const types = mcqOnly
+      ? `All "mcq" with 4 options, except about ${tf} "truefalse" about a concept (never about what code outputs).`
+      : `Mostly "mcq" with 4 options; about ${tf} "truefalse" about a concept (never about what code outputs) and about ${written} "written" whose answer is a single value a program produces, like 7 or [1, 2] (put it in "accept").`;
+    const diff = LEVEL_TEXT[difficulty]
+      ? `every question must be ${LEVEL_TEXT[difficulty]}. Rate each one honestly in "difficulty": QuizNova throws away any question that isn't ${difficulty}`
+      : 'mixed, roughly a third easy, a third medium and a third hard';
+    return [
+      `Write ${n} coding-interview questions about ${about}.`,
+      'Every question must test data structures, algorithms or code logic — something to work out, not a fact to remember. Never ask who invented, discovered, created, proposed or named anything, when or where something was made, or anything about people, companies, history or where a name comes from.',
+      `Use these kinds of question, about half of them code tracing: ${CODING_KINDS.join('; ')}.`,
+      focus.length ? `This round, cover: ${focus.join('; ')}.` : '',
+      'Code rules: JavaScript only, at most 14 lines and 60 characters per line, no randomness, dates, input, DOM or network. Put code only in "code" (an empty string when a question has none), never in "question". When a question asks what code returns or prints, make the last line of "code" a single call or expression whose value is the answer (like maxSum([2, 1, 5], 2)), or print with console.log.',
+      'Write values as JavaScript shows them: arrays as [1, 2, 3], strings in double quotes, true and false.',
+      'Trace every snippet step by step before choosing the answer, then check it again; QuizNova runs the code and throws away any question whose marked answer is wrong. Show the key steps of the trace in "explain". Make wrong options the results of typical mistakes (off by one, the wrong pointer moved, a missed base case).',
+      `Difficulty: ${diff}.`,
+      `Types: ${types} Mix up the order.`,
+      avoid.length ? `Do not repeat or closely rephrase any of these recent questions (question → answer):\n${avoid.map(a => `- ${a}`).join('\n')}` : '',
+      `Round id: ${uid()}`,
+    ].filter(Boolean).join('\n\n');
+  }
+
   function aiPrompt({ subject, topic, n, difficulty, mcqOnly, avoid }) {
     const about = subject === 'custom' ? `"${topic}"` : SUBJ[subject].topic;
+    if (isCodingSpec({ subject, topic })) return codingPrompt({ about, n, difficulty, mcqOnly, avoid, focus: subject !== 'custom' && SUBJ[subject].focus ? shuffle(SUBJ[subject].focus).slice(0, 4) : [] });
     if (isMathsSpec({ subject, topic })) return mathsPrompt({ about, n, difficulty, mcqOnly, avoid, exam: examOf({ subject, topic }) });
     const tf = Math.max(1, Math.round(n / 5)), written = Math.max(1, Math.round(n / 8));
     const types = mcqOnly
@@ -741,7 +779,8 @@ Format:
   async function aiGenerate(spec, onQuestion, signal) {
     const cfg = aiCfg();
     if (!cfg.key && !sharedAI) throw new Error('no-key');
-    const req = { prompt: spec.prompt || aiPrompt(spec), system: spec.system || AI_SYSTEM, schema: spec.schema || QUESTION_SCHEMA, maths: isMathsSpec(spec) };
+    const coding = !spec.prompt && isCodingSpec(spec);
+    const req = { prompt: spec.prompt || aiPrompt(spec), system: spec.system || AI_SYSTEM, schema: spec.schema || (coding ? CODE_SCHEMA : QUESTION_SCHEMA), maths: isMathsSpec(spec) || coding };
     const stream = cfg.key ? (model, r, emit, sig) => geminiStream(cfg.key, model, r, emit, sig) : (model, r, emit, sig) => firebaseStream(model, r, emit, sig);
     const all = [cfg.model, ...Object.keys(AI_MODELS).filter(m => m !== cfg.model)];
     const fast = m => !(slowModels.get(m) > now());
@@ -951,7 +990,7 @@ Format:
   }
 
   // Turns one AI question into the game's format, or null if it isn't usable (UNSURE if it contradicts itself).
-  function normalizeAI(r, mcqOnly, maths = false, tx = MATHS_TX) {
+  function normalizeAI(r, mcqOnly, maths = false, tx = MATHS_TX, coding = false) {
     if (!r || typeof r.question !== 'string') return null;
     const q = r.question.trim().slice(0, 500);
     if (q.length < 8) return null;
@@ -961,6 +1000,8 @@ Format:
       difficulty: DIFF_MULT[r.difficulty] ? r.difficulty : 'medium',
     };
     if (maths) base.tx = tx[base.difficulty];
+    const code = coding && typeof r.code === 'string' ? r.code.replace(/\r/g, '').replace(/^\s*\n|\s+$/g, '').slice(0, 1200) : '';
+    if (code) { base.code = code; base.lang = 'js'; r = { ...r, explain: '' }; }
     if (r.type === 'truefalse') {
       if (r.answer !== 0 && r.answer !== 1) return null;
       const said = typeof r.correct === 'string' ? normAnswer(r.correct) : '';
@@ -981,6 +1022,49 @@ Format:
     const perm = shuffle([0, 1, 2, 3]);
     return { ...base, type: 'mcq', options: perm.map(k => opts[k]), answer: perm.indexOf(r.answer) };
   }
+
+  // AI code questions are checked by running the snippet in a throwaway Web Worker with no network access and a time
+  // limit; a question survives only if its marked answer is what the code really returns or prints.
+  const CODE_WORKER = `
+    for (const k of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'indexedDB', 'caches', 'BroadcastChannel']) { try { self[k] = undefined; } catch (e) {} }
+    const fmt = v => Array.isArray(v) ? '[' + v.map(fmt).join(', ') + ']' : typeof v === 'string' ? JSON.stringify(v) : v && typeof v === 'object' ? JSON.stringify(v) : String(v);
+    onmessage = e => {
+      const logs = [];
+      self.console = { log: (...a) => logs.push(a.map(x => typeof x === 'string' ? x : fmt(x)).join(' ')), error() {}, warn() {}, info() {} };
+      let value = null;
+      try { const v = (0, eval)(e.data); value = v === undefined ? null : fmt(v); }
+      catch (err) { postMessage({ ok: false }); return; }
+      setTimeout(() => postMessage({ ok: true, value, logs }), 30); // lets timers and promises log first
+    };`;
+  let codeWorkerURL = null;
+  const OUTPUT_Q = /\b(return|returns|returned|print|prints|printed|output|outputs|log|logs|logged|evaluates?|value)\b/i;
+  const normOut = v => String(v).normalize('NFKC').replace(/[−–]/g, '-').replace(/[\s"'`;]/g, '').toLowerCase();
+  function runCode(code, ms = 600) {
+    return new Promise(resolve => {
+      let w;
+      try { codeWorkerURL = codeWorkerURL || URL.createObjectURL(new Blob([CODE_WORKER], { type: 'text/javascript' })); w = new Worker(codeWorkerURL); }
+      catch (e) { resolve(null); return; }
+      const done = r => { clearTimeout(t); w.terminate(); resolve(r); };
+      const t = setTimeout(() => done({ ok: false }), ms);
+      w.onmessage = e => done(e.data);
+      w.onerror = () => done({ ok: false });
+      w.postMessage(code);
+    });
+  }
+  // true: keep, false: drop. Questions without code, or not about output (complexity, choice of structure), pass.
+  async function checkCode(q) {
+    if (!q.code || !OUTPUT_Q.test(q.q)) return true;
+    if (q.tf) return false; // a true/false claim about output can't be checked reliably
+    const r = await runCode(q.code);
+    if (!r) return true; // no workers in this browser: keep, as before
+    if (!r.ok) return false;
+    const outs = [r.value, r.logs.join('\n'), r.logs.join(', '), r.logs[r.logs.length - 1]].filter(v => v != null && v !== '').map(normOut);
+    const marked = normOut(q.type === 'written' ? q.accept[0] : q.options[q.answer]);
+    if (!outs.includes(marked)) return false;
+    return q.type === 'written' || !q.options.some((o, i) => i !== q.answer && outs.includes(normOut(o)));
+  }
+  // History and trivia slipping into a coding game.
+  const TRIVIA_Q = /\b(invent(ed|or|ors)?|discover(ed|er)?|who (created|designed|developed|proposed|introduced|coined|wrote)|named after|in (what|which) year|which year|founded|history of|credited)\b/i;
 
   function aiErrorInfo(err) {
     if (!err) return null;
@@ -1278,7 +1362,7 @@ Latency-sensitive; begin your visible answer immediately.`;
     const ctrl = new AbortController();
     g.feed = { done: false, error: null, errorKey: false, abort: ctrl, model: aiLabel(), rejected: 0, unsure: 0, offLevel: 0, more: null };
     const key = histKey(spec.subject, spec.topic);
-    const maths = isMathsSpec(spec), tx = examOf(spec) ? APT_TX : MATHS_TX;
+    const coding = isCodingSpec(spec), maths = isMathsSpec(spec), tx = coding ? CODE_TX : examOf(spec) ? APT_TX : MATHS_TX;
     const mcqOnly = !!spec.mcqOnly;
     // A chosen difficulty is never mixed: questions the AI rates at another level are thrown away.
     const level = LEVEL_TEXT[spec.difficulty] ? spec.difficulty : null;
@@ -1290,21 +1374,27 @@ Latency-sensitive; begin your visible answer immediately.`;
       // Ask for spares so repeats, doubtful questions and ones at the wrong level can be thrown away (more once
       // there's history to clash with), then stop as soon as the game is full.
       const ask = Math.min(want + (history.length ? 6 : 4) + (level ? 4 : 0), 30);
-      aiGenerate({ ...spec, mcqOnly, n: ask, avoid, onModel: modelSwitch(g) }, raw => {
+      const checks = []; // code checks still running
+      const take = q => {
         if (S.game !== g || g.questions.length >= g.n) return;
-        const q = normalizeAI(raw, mcqOnly, maths, tx);
-        if (q === UNSURE) { g.feed.unsure++; return; }
-        if (!q || (offTopic && offTopic(q))) return;
-        if (level && q.difficulty !== level) { g.feed.offLevel++; return; }
-        const e = histEntry(q);
-        if (g.questions.some(o => sameQuestion(histEntry(o), e)) || history.some(h => sameQuestion(h, e))) { g.feed.rejected++; return; }
         addQuestions(g, [q]);
         rememberAI(key, [q]); // saved straight away, so quitting mid-game still counts it as asked
         onFeedProgress(g);
         if (g.questions.length >= g.n) ctrl.abort();
+      };
+      aiGenerate({ ...spec, mcqOnly, n: ask, avoid, onModel: modelSwitch(g) }, raw => {
+        if (S.game !== g || g.questions.length >= g.n) return;
+        const q = normalizeAI(raw, mcqOnly, maths || coding, tx, coding);
+        if (q === UNSURE) { g.feed.unsure++; return; }
+        if (!q || (offTopic && offTopic(q)) || (coding && TRIVIA_Q.test(q.q))) return;
+        if (level && q.difficulty !== level) { g.feed.offLevel++; return; }
+        const e = histEntry(q);
+        if (g.questions.some(o => sameQuestion(histEntry(o), e)) || history.some(h => sameQuestion(h, e))) { g.feed.rejected++; return; }
+        if (coding && q.code) { checks.push(checkCode(q).then(ok => (ok ? take(q) : g.feed.unsure++))); return; }
+        take(q);
       }, ctrl.signal)
-        .then(() => finishFeed(g, null))
-        .catch(err => finishFeed(g, err));
+        .then(() => Promise.all(checks).then(() => finishFeed(g, null)))
+        .catch(err => Promise.all(checks).then(() => finishFeed(g, err)));
     };
     g.feed.more = missing => { g.feed.more = null; run(missing); };
     run(spec.n);
