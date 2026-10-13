@@ -612,6 +612,13 @@ body.logged-out .sidebar, body.logged-out .needs-user { display: none !important
   box-shadow: var(--neu-sm);
 }
 .code code { font: inherit; white-space: pre; }
+.code .cl { display: block; }
+/* Phones: long lines wrap, and the wrapped part is indented two steps past the line's own indentation (--in). */
+@media (max-width: 560px) {
+  .code { padding: 14px; font-size: .8rem; line-height: 1.55; border-radius: 18px; }
+  .code code { white-space: pre-wrap; }
+  .code .cl { padding-left: var(--in); text-indent: calc(-1 * var(--in)); overflow-wrap: anywhere; }
+}
 .tk-kw { color: #FF8A84; }
 .tk-str { color: #A7E3A1; }
 .tk-num { color: #F5C26B; }

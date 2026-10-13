@@ -17,7 +17,7 @@ pipeline {
     stage('Validate') {
       steps {
         script {
-          def required = ['index.html', 'css/style.css', 'js/config.js', 'js/data.js', 'js/maths.js', 'js/aptitude.js', 'js/gate.js', 'js/cat.js', 'js/app.js', 'assets/quiznova-logo.webp', 'assets/quiznova-mark.webp', 'assets/favicon.png']
+          def required = ['index.html', 'css/style.css', 'js/config.js', 'js/data.js', 'js/maths.js', 'js/aptitude.js', 'js/gate.js', 'js/cat.js', 'js/dsa.js', 'js/app.js', 'assets/quiznova-logo.webp', 'assets/quiznova-mark.webp', 'assets/favicon.png']
           required.each { f ->
             if (!fileExists(f)) {
               error "Missing required file: ${f}"
@@ -35,6 +35,7 @@ pipeline {
                 node --check js/aptitude.js
                 node --check js/gate.js
                 node --check js/cat.js
+                node --check js/dsa.js
                 node --check js/app.js
                 echo "JavaScript syntax check passed."
               else
@@ -55,6 +56,7 @@ pipeline {
               node --check js/aptitude.js || exit /b 1
               node --check js/gate.js || exit /b 1
               node --check js/cat.js || exit /b 1
+              node --check js/dsa.js || exit /b 1
               node --check js/app.js || exit /b 1
               echo JavaScript syntax check passed.
             '''
