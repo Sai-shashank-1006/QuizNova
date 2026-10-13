@@ -13,34 +13,14 @@
   'use strict';
   const QM = window.QUIZ_MATHS;
   if (!QM || !QM.register) return;
-  const { num, frac, gcd, lcm, sup, MINUS } = QM.helpers;
+  const { num, frac, gcd, lcm, sup, MINUS, ratio, fact, nCr, signed, ord, distinct, probW, ratioW } = QM.helpers;
 
   /* ---------- Helpers ---------- */
   const rs = v => `₹${num(v)}`;
   const pw = (b, e) => (e === 1 ? `${b}` : `${b}${sup(e)}`);
-  const ratio = (a, b) => { const g = gcd(a, b); return `${a / g} : ${b / g}`; };
-  const fact = n => { let f = 1; for (let i = 2; i <= n; i++) f *= i; return f; };
-  const nCr = (n, r) => { if (r < 0 || r > n) return 0; let v = 1; for (let i = 1; i <= r; i++) v = (v * (n - r + i)) / i; return Math.round(v); };
   const digitSum = n => String(n).split('').reduce((s, c) => s + +c, 0);
-  const fracValue = s => { const [a, b] = String(s).split('/').map(Number); return b ? a / b : a; };
-  const signed = v => (v < 0 ? `(${MINUS}${-v})` : `${v}`);
-  const ord = n => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`;
   const powers = (p, a) => Array.from({ length: a + 1 }, (_, i) => p ** i).join(' + ');
-  // Distinct wrong options, never the answer.
-  const distinct = (ans, list) => { const out = []; for (const v of list) if (v != null && v !== '' && v !== ans && !out.includes(v)) out.push(v); return out; };
   const digitW = (d, h, slips = []) => distinct(String(d), [...slips.map(v => String(((v % 10) + 10) % 10)), ...h.shuffle([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).map(String)]);
-  // Wrong probabilities: the given slips first, then near misses, all between 0 and 1.
-  function probW(n, d, h, slips = []) {
-    const near = [[n + 1, d], [n - 1, d], [n, d + 1], [n, d - 1], [n + 1, d + 1], [d - n, d], [n, 2 * d], [2 * n, d]];
-    const cand = [...slips, ...h.shuffle(near).filter(([a, b]) => a > 0 && b > 0 && a <= b).map(([a, b]) => frac(a, b))];
-    return distinct(frac(n, d), cand.filter(s => { const v = fracValue(s); return v > 0 && v <= 1; }));
-  }
-  // A ratio's wrong options: the given slips, then nearby ratios.
-  function ratioW(ans, h, slips = []) {
-    const [a, b] = ans.split(' : ').map(Number);
-    const near = [[b, a], [a + 1, b], [a, b + 1], [a + 1, b + 1], [a * 2, b + 1], [a + 2, b]].map(([x, y]) => ratio(x, y));
-    return distinct(ans, [...slips, ...h.shuffle(near)]);
-  }
   const change = v => (v > 0 ? `${num(v)}% increase` : v < 0 ? `${num(-v)}% decrease` : 'No change');
   const clock = m => { const hh = Math.floor(m / 60) % 24, mm = m % 60; return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`; };
   // Pairs whose answers come out whole, found once.

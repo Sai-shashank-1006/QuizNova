@@ -11,6 +11,7 @@ QuizNova is a quiz game built with **HTML5, CSS3 and JavaScript**. It runs in an
 - **Mystery boxes:** in battles and online rooms, boxes drop on random questions. The fastest right answer wins a power-up: 50:50, +10 s or Skip.
 - **Real maths:** the Maths subjects are solvable problems (arithmetic, algebra, geometry, calculus) that QuizNova makes and checks itself, with no AI needed (or pick AI if you prefer).
 - **Aptitude:** quantitative aptitude for SSC, banking, railway and placement tests, in 16 topics you learn in order, each with easy, medium and hard problems, plus a full mixed Aptitude Test.
+- **GATE and CAT:** GATE General Aptitude, Engineering Maths and the CS/IT syllabus (15 topics), and CAT Quant, Data Interpretation and Logical Reasoning (7 topics), with mock tests, data tables, matrices, puzzles and type-in answers like the real exams.
 - **Built-in questions:** 231 questions work fully offline when AI is off. AI rounds never mix them in.
 - **Phones and PCs:** the layout adapts from a wide desktop down to a small phone, with a bottom navigation bar and a score bar on small screens. Slow devices automatically get a lighter version with fewer looping animations.
 - **Look:** a neumorphic (soft, raised) design in light grey, near-black and red, with light and dark modes and lots of motion (see [Animations](#animations)).
@@ -76,6 +77,8 @@ For the most accurate AI questions, use Gemini 3.6 Flash. For guaranteed-correct
 | Educational | HTML & CSS, JavaScript, Git & DevOps, Data Structures, Science | Geography, History |
 | Maths | Mathematics (a mix), Arithmetic, Basic Algebra, Algebra, Geometry & Trig, Calculus: endless generated problems, no AI needed | — |
 | Aptitude | Aptitude Test (all topics mixed) and 16 topics from Number System to Probability: endless generated problems, no AI needed | — |
+| GATE | GATE CS Mock, GATE Aptitude & Maths and 15 topics (General Aptitude, Engineering Maths, CS/IT): endless generated problems | Verbal Aptitude |
+| CAT | CAT Mock and 7 topics (Quant, Data Interpretation, Logical Reasoning): endless generated problems | VARC |
 | Comics | Marvel, DC | — |
 | Movies | Hollywood, MCU (Marvel Cinematic Universe), Indian Cinema, TFI (Telugu cinema: the tier-1 heroes and star directors; AI rounds use checked film data), Dune (Part One and Part Two) | Harry Potter, Star Wars |
 | Series | Game of Thrones, House of the Dragon | Series Mix, Stranger Things, Breaking Bad, Money Heist, Squid Game, Friends, The Office, Indian Web Series, K-Dramas, Cartoons |
@@ -138,6 +141,48 @@ The **Aptitude** tab lists 16 topics, numbered in the order to learn them. Play 
 - **Answers** with money, units or percentages (₹450, 45 km/h, 450 cm², 25%) can be typed with or without the ₹ or the unit.
 - **More time:** aptitude problems get 1.6× (easy) to 2.8× (hard) the normal limit, since they need working out.
 - Choosing **AI** for an aptitude subject (or typing a topic like "profit and loss") asks for competitive-exam style problems with ₹ and π = 22/7.
+
+## GATE and CAT
+
+Two more exam tabs work like Aptitude: numbered topics in learning order, each on Easy, Medium and Hard, plus mixed mock tests. The problems come from `js/gate.js` and `js/cat.js`, and every answer is computed by code. Schedules, page faults, hash tables, heaps, minimal DFAs, K-map covers, normal forms and seating puzzles are actually simulated or solved, not looked up.
+
+**GATE** (topics 1–7 are common to every branch; 8–15 are the CS/IT paper):
+
+| # | Topic | What it covers |
+|---|---|---|
+| 1 | Numerical Ability | General Aptitude quant, a level above the Aptitude tab |
+| 2 | Analytical Reasoning | Clock angles and coinciding hands, calendars (odd days), directions, coding–decoding, counting squares and rectangles, painted cubes |
+| 3 | Linear Algebra | Determinants, rank, nullity, eigenvalues (and of A², A⁻¹, A + kI), inverses, systems with no solution, Cayley–Hamilton |
+| 4 | Calculus | Standard limits, maxima and minima, definite integrals, Wallis and Gamma integrals, Taylor coefficients, gradient, double integrals |
+| 5 | Probability & Statistics | Mean, median, mode, variance, Bayes, binomial, Poisson, exponential, uniform, geometric |
+| 6 | Differential Equations | Order and degree, first- and second-order linear ODEs, initial values, Cauchy–Euler, particular integrals (ME, EE, EC, CE) |
+| 7 | Numerical Methods | Bisection, Newton–Raphson, trapezoidal and Simpson rules (with tables), Euler, Gauss–Seidel, error orders (ME, EE, EC, CE) |
+| 8 | Discrete Mathematics | Counting relations and functions, onto functions, pigeonhole, inclusion–exclusion, graphs, colouring, trees, Bell and Stirling numbers, groups, truth tables |
+| 9 | Digital Logic | Number systems, two’s complement and overflow, Gray code, minterms, K-map prime and essential implicants, counters, multiplexers, IEEE 754 |
+| 10 | Computer Organization | Address lines, cache tag/index bits and tag directories, AMAT, pipelines, CPI, disks, expanding opcodes |
+| 11 | Data Structures & Algorithms | Array addressing, heaps, BST traversals, hashing with linear probing, postfix, infix → postfix, master theorem, loop complexity, Dijkstra, MST |
+| 12 | Operating Systems | fork(), paging and multi-level paging, TLB, FCFS/SJF/SRTF/Round Robin (with process tables), FIFO/LRU/OPT page faults, disk scheduling, deadlock |
+| 13 | Databases | Closures, candidate and super keys, highest normal form, B+ tree order, conflict serializability (with a schedule table) |
+| 14 | Computer Networks | Subnetting, delays, stop-and-wait and sliding-window utilisation, sequence bits, Shannon and Nyquist, Hamming distance, CRC, token bucket, TCP slow start, fragmentation |
+| 15 | Theory of Computation | Minimal DFA sizes (computed by minimising), counting strings, regular expressions, language classes, closure and decidability facts |
+
+**CAT**:
+
+| # | Topic | What it covers |
+|---|---|---|
+| 1 | Arithmetic | Mark-up with discount and false weights, meeting trains, races, wages, circular tracks, instalments, leaks, alternate-day work |
+| 2 | Number System | Legendre, factors, last two digits, remainders (CRT, Fermat, Wilson), bases, trailing zeros in other bases, repunits, totient |
+| 3 | Algebra | Progressions, roots of quadratics, inequalities, functions, logs, identities, minimum values, modulus equations, series |
+| 4 | Geometry & Mensuration | Polygons, Heron, similar triangles, chords, tangents, angle bisectors, coordinates, solids |
+| 5 | Modern Maths | Stars and bars, distributions, committees, arrangements, dice, cards, three-set Venn surveys, counting numbers |
+| 6 | Data Interpretation | Sales and marks tables: totals, growth, shares, ratios, projections |
+| 7 | Logical Reasoning | Seating arrangements (every puzzle checked to have exactly one solution), tournaments, set puzzles |
+
+- **Typed answers** come up often (GATE’s numerical-answer questions, CAT’s TITA), and may be decimals such as 2.25.
+- **Mocks:** GATE CS Mock (aptitude, maths and core CS), GATE Aptitude & Maths (the part common to every branch) and CAT Mock (Quant, DI and LR).
+- **Verbal sections** (GATE Verbal Aptitude, CAT VARC) can’t be generated from formulas, so the AI writes them.
+- **More time:** these problems get 1.8× to 3× the normal limit, and seating puzzles up to 5×.
+- **Tables, matrices and clues** travel in challenge codes and online rooms, so friends see the same data.
 
 ## Game modes
 
@@ -270,6 +315,8 @@ Quiz Application/
 │   ├── data.js     # Categories, subjects (with AI topics) and the 231 built-in questions
 │   ├── maths.js    # Maths problem generator: arithmetic → calculus, answers worked out by QuizNova
 │   ├── aptitude.js # Aptitude problem generator: 16 quantitative-aptitude topics, easy → hard
+│   ├── gate.js     # GATE generator: General Aptitude, Engineering Maths and the CS/IT syllabus
+│   ├── cat.js      # CAT generator: Quant, Data Interpretation (tables) and Logical Reasoning (puzzles)
 │   └── app.js      # Accounts, AI question streaming (Gemini), solo, battle and online engines, mystery boxes, challenge codes, stats, motion helpers
 ├── Jenkinsfile     # CI pipeline: checkout → validate → package
 └── README.md
@@ -295,6 +342,15 @@ git push -u origin main
 ```
 
 No API key is ever committed. `js/config.js` only holds the shared AI's public Firebase settings; a player's own key stays in their browser.
+
+### Versions
+
+Each release is a git tag, so you can always go back (`git checkout <tag>`):
+
+| Tag | What changed |
+|---|---|
+| `v1.0-beta` | The first playable version |
+| `v2.1` | Gemini AI with a shared key, phone layout, strict difficulty, mystery boxes, 20-question games, Aptitude (16 topics), GATE (15 topics) and CAT (7 topics) |
 
 ## CI with Jenkins
 

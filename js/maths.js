@@ -81,6 +81,28 @@
     return out;
   }
 
+  /* ---------- Shared by the exam generators (js/aptitude.js, js/gate.js, js/cat.js) ---------- */
+  const ratio = (a, b) => { const g = gcd(a, b); return `${a / g} : ${b / g}`; };
+  const fact = n => { let f = 1; for (let i = 2; i <= n; i++) f *= i; return f; };
+  const nCr = (n, r) => { if (r < 0 || r > n) return 0; let v = 1; for (let i = 1; i <= r; i++) v = (v * (n - r + i)) / i; return Math.round(v); };
+  const fracValue = s => { const [a, b] = String(s).replace(MINUS, '-').split('/').map(Number); return b ? a / b : a; };
+  const signed = v => (v < 0 ? `(${MINUS}${-v})` : `${v}`);
+  const ord = n => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`;
+  // Distinct wrong options, never the answer.
+  const distinct = (ans, list) => { const out = []; for (const v of list) if (v != null && v !== '' && v !== ans && !out.includes(v)) out.push(v); return out; };
+  // Wrong probabilities: the given slips first, then near misses, all between 0 and 1.
+  function probW(n, d, h, slips = []) {
+    const near = [[n + 1, d], [n - 1, d], [n, d + 1], [n, d - 1], [n + 1, d + 1], [d - n, d], [n, 2 * d], [2 * n, d]];
+    const cand = [...slips, ...h.shuffle(near).filter(([a, b]) => a > 0 && b > 0 && a <= b).map(([a, b]) => frac(a, b))];
+    return distinct(frac(n, d), cand.filter(s => { const v = fracValue(s); return v > 0 && v <= 1; }));
+  }
+  // A ratio's wrong options: the given slips, then nearby ratios.
+  function ratioW(ans, h, slips = []) {
+    const [a, b] = ans.split(' : ').map(Number);
+    const near = [[b, a], [a + 1, b], [a, b + 1], [a + 1, b + 1], [a * 2, b + 1], [a + 2, b]].map(([x, y]) => ratio(x, y));
+    return distinct(ans, [...slips, ...h.shuffle(near)]);
+  }
+
   /* ---------- Problem makers ----------
      Each returns { q, a, ex } plus optional:
        x   — numeric slips used as wrong options (when a is a number)
@@ -410,27 +432,39 @@
 
   const KINDS = { arith: ARITH, algebra1: ALGEBRA1, algebra: ALGEBRA, geometry: GEOMETRY, calculus: CALCULUS };
   const TX = { easy: 1, medium: 1.3, hard: 1.6 };
-  // Other generators (js/aptitude.js) add kinds with register(). A group ("mix", "apt-mix") is a set of kinds played
-  // together; META holds each added kind's topic name and time factors.
+  // Other generators (js/aptitude.js, js/gate.js, js/cat.js) add kinds with register(). A group ("mix", "apt-mix") is a
+  // set of kinds played together; a kind can be in several. META holds each added kind's topic name, time factors and
+  // how often it asks for a typed answer (written; decimals allows answers like 2.25, as in GATE's numerical questions);
+  // positive drops wrong options of 0 or less when the answer is a positive quantity.
   const GROUPS = { mix: Object.keys(KINDS) };
   const META = {};
-  function register(kind, makers, { topic = '', tx = null, group = null } = {}) {
+  function register(kind, makers, { topic = '', tx = null, group = null, written = 0.2, decimals = false, positive = false } = {}) {
     KINDS[kind] = makers;
-    META[kind] = { topic, tx };
-    if (group) (GROUPS[group] = GROUPS[group] || []).push(kind);
+    META[kind] = { topic, tx, written, decimals, positive };
+    for (const g of [].concat(group || [])) (GROUPS[g] = GROUPS[g] || []).push(kind);
   }
 
   /* ---------- Turning a problem into a quiz question ---------- */
-  // s.pre is put before numeric options (₹), s.u after them (%, km/h).
+  // s.pre is put before numeric options (₹), s.u after them (%, km/h). s.table, s.lines (numbered clues) and s.code
+  // go with the question; s.tf (true/false) makes it a statement to judge; s.noType keeps it multiple choice.
   function assemble(s, lv, h, mcqOnly, meta = {}) {
     const fmt = v => (typeof v === 'number' ? (s.pre || '') + num(v) + (s.u || '') : v);
     const base = { q: s.q, explain: s.ex, difficulty: lv, tx: s.tx || (meta.tx || TX)[lv], gen: true };
+    if (s.table) base.table = s.table;
+    if (s.lines) base.lines = s.lines;
+    if (s.code) { base.code = s.code; base.lang = s.lang; }
+    if (typeof s.tf === 'boolean') {
+      return { ...base, type: 'mcq', tf: true, q: `True or false: ${s.q}`, options: ['True', 'False'], answer: s.tf ? 0 : 1 };
+    }
     const numeric = typeof s.a === 'number';
-    const wrongs = numeric ? nearNums(s.a, h, (s.x || []).filter(v => Number.isFinite(v))).map(fmt) : (s.w || []);
+    const slips = (s.x || []).filter(v => Number.isFinite(v) && !(meta.positive && s.a > 0 && v <= 0));
+    const wrongs = numeric ? nearNums(s.a, h, slips).map(fmt) : (s.w || []);
     const correct = fmt(s.a);
     const roll = h.r();
-    // Typed answer: whole-number answers only, checked by value.
-    if (!mcqOnly && numeric && Number.isInteger(s.a) && roll < 0.2) {
+    const cents = numeric ? Math.round(s.a * 100) : NaN;
+    const typeable = numeric && !s.noType && (Number.isInteger(s.a) || (meta.decimals && Math.abs(s.a * 100 - cents) < 1e-9));
+    // Typed answer: whole numbers (or two-place decimals where allowed), checked by value.
+    if (!mcqOnly && typeable && roll < (meta.written ?? 0.2)) {
       return { ...base, type: 'written', num: s.a, accept: [String(s.a), num(s.a)], answerText: correct };
     }
     // True or false: show the right answer or a likely wrong one.
@@ -463,14 +497,16 @@
       let m = h.int(0, makers.length - 1);
       if (makers.length > 1 && m === lastMaker[k + lv]) m = (m + 1) % makers.length; // no same problem type twice in a row
       const spec = makers[m](h);
-      if (!spec || seen.has(spec.q)) continue;
+      // Same wording can carry different data ("What is the determinant of A?"), so the table and code count too.
+      const key = spec && spec.q + (spec.table ? JSON.stringify(spec.table.rows) : '') + (spec.code || '') + (spec.lines ? spec.lines.join('|') : '');
+      if (!spec || seen.has(key)) continue;
       const meta = META[k] || {};
       const q = assemble(spec, lv, h, mcqOnly, meta);
       if (!q) continue;
       // The sub-topic it practises (and, in a mixed test, its topic), shown with the question.
       const tag = [group && meta.topic, spec.t].filter(Boolean).join(' · ');
       if (tag) q.tag = tag;
-      seen.add(spec.q);
+      seen.add(key);
       lastMaker[k + lv] = m;
       out.push(q);
       i++;
@@ -489,6 +525,7 @@
 
   window.QUIZ_MATHS = {
     build, parseNumber, register, KINDS: Object.keys(KINDS),
-    helpers: { num, frac, gcd, lcm, sup, MINUS, nearNums },
+    makersOf: kind => KINDS[kind], // lets one generator reuse another's problems (GATE's numerical ability)
+    helpers: { num, frac, gcd, lcm, sup, MINUS, nearNums, poly, ratio, fact, nCr, fracValue, signed, ord, distinct, probW, ratioW },
   };
 })();
